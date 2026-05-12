@@ -29,7 +29,7 @@ jobs:
 
       - name: Build iOS Archive
         run: |
-          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphoneos -configuration Release archive -archivePath build/InvoiceSmart.xcarchive -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
+          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphoneos -configuration Release archive -archivePath build/InvoiceSmart.xcarchive DEVELOPMENT_TEAM="4G3G5MX9BH" CODE_SIGN_STYLE="Automatic" -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
 
       - name: Export Signed IPA
         run: |
