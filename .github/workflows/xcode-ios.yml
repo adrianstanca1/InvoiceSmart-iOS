@@ -24,12 +24,29 @@ jobs:
           echo "${{ secrets.ASC_PRIVATE_KEY }}" > ~/.config/apple/AuthKey_S7PSXPJ963.p8
           chmod 600 ~/.config/apple/AuthKey_S7PSXPJ963.p8
 
+      - name: Setup Signing
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "${{ secrets.IOS_DISTRIBUTION_P12 }}" | base64 -d > /tmp/ios_dist.p12
+          echo "${{ secrets.IOS_PROVISIONING_PROFILE }}" | base64 -d > "~/Library/MobileDevice/Provisioning\ Profiles/3cecb2b9-bb5f-453a-abd0-b4a63f03be2c.mobileprovision"
+          echo "${{ secrets.IOS_DISTRIBUTION_KEY }}" | base64 -d > /tmp/ios_dist.key
+          echo "${{ secrets.IOS_DISTRIBUTION_CERT }}" | base64 -d > /tmp/ios_dist.crt
+          security create-keychain -p "buildtrack123" build.keychain
+          security unlock-keychain -p "buildtrack123" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import /tmp/ios_dist.key -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t priv
+          security import /tmp/ios_dist.crt -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t cert
+          security import /tmp/ios_dist.p12 -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t cert
+          security list-keychains -s ~/Library/Keychains/build.keychain
+          security set-key-partition-list -S apple-tool:,apple: -k "buildtrack123" build.keychain || true
+
       - name: Prebuild Xcode project
         run: npx expo prebuild --platform ios --non-interactive || true
 
       - name: Build iOS Archive
         run: |
-          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphoneos -configuration Release archive -archivePath build/InvoiceSmart.xcarchive DEVELOPMENT_TEAM="4G3G5MX9BH" CODE_SIGN_STYLE="Automatic" -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
+          PROV_UUID="3cecb2b9-bb5f-453a-abd0-b4a63f03be2c"
+          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphoneos -configuration Release archive -archivePath build/InvoiceSmart.xcarchive DEVELOPMENT_TEAM="4G3G5MX9BH" CODE_SIGN_STYLE="Manual" PROVISIONING_PROFILE_SPECIFIER="InvoiceSmart App Store v2" PROVISIONING_PROFILE="${PROV_UUID}" -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
 
       - name: Export Signed IPA
         run: |
