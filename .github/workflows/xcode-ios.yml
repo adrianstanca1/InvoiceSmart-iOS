@@ -19,23 +19,26 @@ jobs:
       - run: npm install -g eas-cli@latest
 
       - name: Setup Apple API Key
-        run: echo "${{ secrets.ASC_PRIVATE_KEY }}" > AuthKey_S7PSXPJ963.p8
+        run: |
+          mkdir -p ~/.config/apple
+          echo "${{ secrets.ASC_PRIVATE_KEY }}" > ~/.config/apple/AuthKey_S7PSXPJ963.p8
+          chmod 600 ~/.config/apple/AuthKey_S7PSXPJ963.p8
 
       - name: Prebuild Xcode project
         run: npx expo prebuild --platform ios --non-interactive || true
 
       - name: Build iOS Archive
         run: |
-          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphoneos -configuration Release archive -archivePath build/InvoiceSmart.xcarchive -authenticationKeyPath AuthKey_S7PSXPJ963.p8 -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
+          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphoneos -configuration Release archive -archivePath build/InvoiceSmart.xcarchive -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
 
       - name: Export Signed IPA
         run: |
           printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key><string>app-store</string>' '  <key>signingStyle</key><string>automatic</string>' '  <key>teamID</key><string>4G3G5MX9BH</string>' '  <key>thinning</key><string>&lt;none&gt;</string>' '  <key>stripSwiftSymbols</key><true/>' '  <key>compileBitcode</key><true/>' '  <key>uploadSymbols</key><true/>' '</dict>' '</plist>' > ExportOptions.plist
-          xcodebuild -exportArchive -archivePath build/InvoiceSmart.xcarchive -exportPath build/Exported -exportOptionsPlist ExportOptions.plist -authenticationKeyPath AuthKey_S7PSXPJ963.p8 -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
+          xcodebuild -exportArchive -archivePath build/InvoiceSmart.xcarchive -exportPath build/Exported -exportOptionsPlist ExportOptions.plist -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
 
       - name: Upload to TestFlight
-        run: xcrun altool --upload-app --type ios --file "build/Exported/InvoiceSmart.ipa" --apiKey S7PSXPJ963 --apiIssuer 4e694aa4-8cbc-4de4-bdf2-0ace72694564
-
+        run: |
+          xcrun altool --upload-app --type ios --file "build/Exported/InvoiceSmart.ipa" --apiKey S7PSXPJ963 --apiIssuer 4e694aa4-8cbc-4de4-bdf2-0ace72694564
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
