@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14
     timeout-minutes: 40
     env:
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
