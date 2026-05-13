@@ -1,9 +1,7 @@
-// @ts-nocheck
-/// <reference types="nativewind/types" />
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { Mail, Lock, LogIn } from 'lucide-react-native';
 import * as api from '../../services/api';
 
