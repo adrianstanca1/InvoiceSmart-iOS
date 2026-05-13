@@ -21,7 +21,11 @@ function withPodfileSwiftConcurrencyFix(config) {
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
-      config.build_settings['SWIFT_VERSION'] = '5.0'
+      # NOTE: don't force SWIFT_VERSION='5.0' (which BuildTrack's original plugin does).
+      # InvoiceSmart-iOS uses a newer expo-modules-core that has `@MainActor`
+      # attributes (Swift 5.5+). Forcing 5.0 makes the compiler reject them.
+      # SWIFT_STRICT_CONCURRENCY=minimal alone fixes the Swift 6 concurrency
+      # errors without breaking @MainActor syntax.
       config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
       config.build_settings['SWIFT_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
     end
@@ -54,7 +58,11 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
-      config.build_settings['SWIFT_VERSION'] = '5.0'
+      # NOTE: don't force SWIFT_VERSION='5.0' (which BuildTrack's original plugin does).
+      # InvoiceSmart-iOS uses a newer expo-modules-core that has `@MainActor`
+      # attributes (Swift 5.5+). Forcing 5.0 makes the compiler reject them.
+      # SWIFT_STRICT_CONCURRENCY=minimal alone fixes the Swift 6 concurrency
+      # errors without breaking @MainActor syntax.
       config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
       config.build_settings['SWIFT_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
     end
