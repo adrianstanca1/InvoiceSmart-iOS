@@ -86,44 +86,40 @@ jobs:
           
           if [ -n "${{ secrets.IOS_PROVISIONING_PROFILE }}" ] && [ -n "${{ secrets.IOS_DISTRIBUTION_P12 }}" ]; then
             echo "Using MANUAL signing with provisioning profile"
-            cat > ExportOptions.plist << 'PLIST'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-              <key>method</key><string>app-store-connect</string>
-              <key>signingStyle</key><string>manual</string>
-              <key>teamID</key><string>4G3G5MX9BH</string>
-              <key>thinning</key><string>&lt;none&gt;</string>
-              <key>compileBitcode</key><false/>
-              <key>uploadBitcode</key><false/>
-              <key>uploadSymbols</key><true/>
-              <key>manageAppVersionAndBuildNumber</key><false/>
-              <key>provisioningProfiles</key>
-              <dict>
-                <key>com.cortexbuildpro.invoicesmart</key><string>InvoiceSmart App Store</string>
-              </dict>
-            </dict>
-            </plist>
-            PLIST
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0">' \
+              '<dict>' \
+              '  <key>method</key><string>app-store-connect</string>' \
+              '  <key>signingStyle</key><string>manual</string>' \
+              '  <key>teamID</key><string>4G3G5MX9BH</string>' \
+              '  <key>thinning</key><string>&lt;none&gt;</string>' \
+              '  <key>compileBitcode</key><false/>' \
+              '  <key>uploadBitcode</key><false/>' \
+              '  <key>uploadSymbols</key><true/>' \
+              '  <key>manageAppVersionAndBuildNumber</key><false/>' \
+              '  <key>provisioningProfiles</key>' \
+              '  <dict>' \
+              '    <key>com.cortexbuildpro.invoicesmart</key><string>InvoiceSmart App Store</string>' \
+              '  </dict>' \
+              '</dict>' \
+              '</plist>' > ExportOptions.plist
           else
             echo "Using AUTOMATIC signing (secrets missing — will fail if app record doesn't exist)"
-            cat > ExportOptions.plist << 'PLIST'
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0">
-            <dict>
-              <key>method</key><string>app-store-connect</string>
-              <key>signingStyle</key><string>automatic</string>
-              <key>teamID</key><string>4G3G5MX9BH</string>
-              <key>thinning</key><string>&lt;none&gt;</string>
-              <key>compileBitcode</key><false/>
-              <key>uploadBitcode</key><false/>
-              <key>uploadSymbols</key><true/>
-              <key>manageAppVersionAndBuildNumber</key><false/>
-            </dict>
-            </plist>
-            PLIST
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0">' \
+              '<dict>' \
+              '  <key>method</key><string>app-store-connect</string>' \
+              '  <key>signingStyle</key><string>automatic</string>' \
+              '  <key>teamID</key><string>4G3G5MX9BH</string>' \
+              '  <key>thinning</key><string>&lt;none&gt;</string>' \
+              '  <key>compileBitcode</key><false/>' \
+              '  <key>uploadBitcode</key><false/>' \
+              '  <key>uploadSymbols</key><true/>' \
+              '  <key>manageAppVersionAndBuildNumber</key><false/>' \
+              '</dict>' \
+              '</plist>' > ExportOptions.plist
           fi
 
           xcodebuild -exportArchive \
