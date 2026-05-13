@@ -8,7 +8,7 @@ import {
   ReceiptUploadResponse, ReportExportResponse, InvoiceAuditResult, FinancialInsight,
 } from '../types';
 
-const API_BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:3002';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:3008';
 
 const api: AxiosInstance = axios.create({
   baseURL: `${API_BASE_URL}/api`,
