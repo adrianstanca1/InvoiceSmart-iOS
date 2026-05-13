@@ -138,10 +138,12 @@ jobs:
           find build/Exported -name "*.ipa" 2>/dev/null || echo "No IPA found"
 
       - name: Upload to TestFlight
-        if: ${{ hashFiles('build/Exported/*.ipa') != '' }}
+        if: always()
         run: |
           IPA=$(ls build/Exported/*.ipa | head -1)
           echo "Uploading $IPA to TestFlight..."
+          mkdir -p ~/.private_keys
+          cp "$HOME/.config/apple/AuthKey_${ASC_KEY_ID}.p8" ~/.private_keys/ || true
           xcrun altool --validate-app \
             --type ios \
             --file "$IPA" \
