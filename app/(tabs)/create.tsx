@@ -1,50 +1,88 @@
-// @ts-nocheck — pre-rewrite content. The types.ts overhaul (in the same
-// commit as this marker) changed Invoice/Client/Transaction shapes from
-// camelCase to snake_case and money fields from number to DECIMAL-string.
-// This screen still uses the old shapes plus a parallel local-storage
-// data model (lib/storage.ts) and is the only consumer of aiService.ts +
-// InvoiceTemplates.tsx. It needs its own rewrite — left as a follow-up
-// because Hermes is concurrently editing this file for NativeWind v4.
-// Removing this marker is the "done" signal for that follow-up.
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  ScrollView, View, Text, TextInput, TouchableOpacity, Alert, KeyboardAvoidingView, Platform,
-  Switch, Modal, FlatList,
+  ScrollView, View, Text, TextInput, TouchableOpacity, Alert,
+  KeyboardAvoidingView, Platform, Modal, FlatList,
 } from 'react-native';
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router';
 import {
-  Plus, Trash2, Save, Share, Sparkles, ArrowUp, ArrowDown, Send, CheckCircle2,
-  CreditCard, Palette, Layout, Receipt, Building2, ChevronDown, X,
+  Plus, Trash2, Save, Share, Sparkles, ArrowUp, ArrowDown, Send,
+  CheckCircle2, ChevronDown, X,
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 import * as api from '../../services/api';
-import { Invoice, LineItem, Client, TaxRule } from '../../types';
+import type {
+  Client, InvoiceFull, InvoiceInput, InvoiceStatus, TaxRule,
+} from '../../types';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { ErrorToast } from '../../components/ErrorToast';
 import { StatusBadge } from '../../components/StatusBadge';
 import { ClientPicker } from '../../components/ClientPicker';
-import { ModernTemplate } from '../../components/InvoiceTemplates';
-import { generateInvoiceFromPrompt } from '../../services/aiService';
+import { fmtMoney, toNum, fmtPercent } from '../../lib/format';
 
-const EmptyInvoice = (): Invoice => ({
-  id: '', invoiceNumber: 'INV-001', date: new Date().toISOString().split('T')[0], dueDate: '',
-  fromName: '', fromEmail: '', fromAddress: '', toName: '', toEmail: '', toAddress: '',
-  lineItems: [{ id: '1', description: '', quantity: 1, rate: 0, taxRate: 20 }],
-  notes: '', terms: 'Payment due within 30 days.', currency: 'GBP', taxRate: 20, discountRate: 0,
-  status: 'Draft', reverseCharge: false, retentionRate: 0, cisRate: 0, template: 'modern',
-  paymentGateway: 'none', showNotes: true, showTerms: true, brandColor: '#2563eb',
+// Local UI shape. Mirrors InvoiceInput but uses strings everywhere
+// (TextInput's source of truth is text). Money + rate columns are
+// parsed via toNum() at save / total-calc time.
+interface LineItemForm {
+  id: string;
+  description: string;
+  quantity: string;
+  unit_price: string;
+}
+
+interface FormState {
+  invoice_id: string | null;
+  client_id: string | null;
+  invoice_number: string;
+  issue_date: string;
+  due_date: string;
+  notes: string;
+  terms: string;
+  tax_rate: string;
+  discount_rate: string;
+  retention_rate: string;
+  cis_rate: string;
+  line_items: LineItemForm[];
+  status: InvoiceStatus;
+}
+
+const TODAY = (): string => new Date().toISOString().slice(0, 10);
+const ADD_30 = (): string => {
+  const d = new Date(); d.setDate(d.getDate() + 30);
+  return d.toISOString().slice(0, 10);
+};
+
+const newLine = (): LineItemForm => ({
+  id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+  description: '',
+  quantity: '1',
+  unit_price: '0',
 });
 
-const COLOR_OPTIONS = ['#2563eb', '#16a34a', '#9333ea', '#dc2626', '#0f172a', '#0ea5e9'];
-const TEMPLATES: Invoice['template'][] = ['modern', 'classic', 'minimal'];
-const GATEWAYS: ('none' | 'stripe' | 'paypal')[] = ['none', 'stripe', 'paypal'];
+const emptyForm = (): FormState => ({
+  invoice_id: null,
+  client_id: null,
+  invoice_number: 'INV-0001',
+  issue_date: TODAY(),
+  due_date: ADD_30(),
+  notes: '',
+  terms: 'Payment due within 30 days.',
+  tax_rate: '20',
+  discount_rate: '0',
+  retention_rate: '0',
+  cis_rate: '0',
+  line_items: [newLine()],
+  status: 'draft',
+});
 
 export default function InvoiceBuilderScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const [invoice, setInvoice] = useState<Invoice>(EmptyInvoice());
+  const editingId = typeof params.id === 'string' ? params.id : null;
+
+  const [form, setForm] = useState<FormState>(emptyForm());
+  const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -53,220 +91,181 @@ export default function InvoiceBuilderScreen() {
   const [error, setError] = useState('');
   const [taxRules, setTaxRules] = useState<TaxRule[]>([]);
   const [showTaxPicker, setShowTaxPicker] = useState(false);
-  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
-  const [showGatewayPicker, setShowGatewayPicker] = useState(false);
 
   const calc = useMemo(() => {
-    const subtotal = invoice.lineItems.reduce((s, i) => s + i.quantity * i.rate, 0);
-    let tax = 0;
-    if (!invoice.reverseCharge) {
-      tax = invoice.lineItems.reduce((s, i) => {
-        const tr = i.taxRate || invoice.taxRate || 0;
-        return s + i.quantity * i.rate * (tr / 100);
-      }, 0);
-    }
-    const discount = subtotal * (invoice.discountRate / 100);
-    const total = subtotal + tax - discount;
-    const retention = subtotal * (invoice.retentionRate / 100);
-    const labor = invoice.lineItems.filter(i => i.isLabor).reduce((a, i) => a + i.quantity * i.rate, 0);
-    const cis = labor * (invoice.cisRate / 100);
-    const amountDue = total - retention - cis;
-    return { subtotal, tax, discount, total, retention, cis, amountDue };
-  }, [invoice]);
+    // Mirrors backend src/utils.ts:calculateInvoiceTotals exactly.
+    const subtotal = form.line_items.reduce(
+      (s, l) => s + toNum(l.quantity) * toNum(l.unit_price), 0
+    );
+    const discount = subtotal * (toNum(form.discount_rate) / 100);
+    const taxable = subtotal - discount;
+    const tax = taxable * (toNum(form.tax_rate) / 100);
+    const retention = taxable * (toNum(form.retention_rate) / 100);
+    const cis = taxable * (toNum(form.cis_rate) / 100);
+    const total = taxable + tax - retention - cis;
+    return { subtotal, discount, taxable, tax, retention, cis, total };
+  }, [form]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [rules] = await Promise.all([
+      const [rulesRes] = await Promise.all([
         api.getTaxRules(),
         (async () => {
-          if (params.id) {
-            const found = await api.getInvoice(params.id as string);
-            if (found) {
-              const normalized: Invoice = {
-                id: found.id,
-                clientId: (found as any).client_id,
-                invoiceNumber: (found as any).invoice_number || 'INV-001',
-                date: (found as any).issue_date || new Date().toISOString().split('T')[0],
-                dueDate: (found as any).due_date || '',
-                fromName: (found as any).from_name || '',
-                fromEmail: (found as any).from_email || '',
-                fromAddress: typeof (found as any).from_address === 'object' ? JSON.stringify((found as any).from_address) : ((found as any).from_address || ''),
-                toName: (found as any).to_name || '',
-                toEmail: (found as any).to_email || '',
-                toAddress: typeof (found as any).to_address === 'object' ? JSON.stringify((found as any).to_address) : ((found as any).to_address || ''),
-                clientVatNumber: (found as any).client_vat_number || '',
-                lineItems: ((found as any).line_items || []).map((li: any, idx: number) => ({
-                  id: li.id || String(idx + 1),
-                  description: li.description || '',
-                  quantity: li.quantity || 1,
-                  rate: li.unit_price || li.rate || 0,
-                  isLabor: li.is_labor || false,
-                  taxRate: li.tax_rate,
-                })),
-                notes: found.notes || '',
-                terms: found.terms || 'Payment due within 30 days.',
-                currency: found.currency || 'GBP',
-                taxRate: (found as any).tax_rate || 20,
-                discountRate: (found as any).discount_rate || 0,
-                retentionRate: (found as any).retention_rate || 0,
-                cisRate: (found as any).cis_rate || 0,
-                status: ((found.status || 'Draft').replace(/^\w/, (c: string) => c.toUpperCase())) as any,
-                template: (found.template || 'modern') as any,
-                brandColor: (found as any).brand_color || '#2563eb',
-                reverseCharge: (found as any).reverse_charge || false,
-                paymentGateway: ((found as any).payment_gateway || 'none') as any,
-                showNotes: (found as any).show_notes !== false,
-                showTerms: (found as any).show_terms !== false,
-              };
-              setInvoice(normalized);
+          if (editingId) {
+            const inv: InvoiceFull = await api.getInvoice(editingId);
+            setForm(invoiceToForm(inv));
+            // Refresh the bound client so the picker shows the right name.
+            if (inv.client_id) {
+              try {
+                const c = await api.getClient(inv.client_id);
+                setClient(c);
+              } catch { /* swallow — client may have been deleted */ }
             }
           } else {
-            const numRes: any = await api.getNextInvoiceNumber();
-            const numStr = typeof numRes === 'string' ? numRes : (numRes?.invoiceNumber || 'INV-001');
-            setInvoice((inv: any) => ({ ...inv, id: Date.now().toString(36), invoiceNumber: numStr }));
+            const numRes = await api.getNextInvoiceNumber();
+            setForm((f) => ({ ...f, invoice_number: numRes.invoiceNumber || 'INV-0001' }));
           }
         })(),
       ]);
-      setTaxRules(rules);
+      setTaxRules(rulesRes.data || []);
     } catch (e: any) {
-      setError(String(e));
+      setError(e?.message || String(e));
     } finally {
       setLoading(false);
     }
-  }, [params.id]);
+  }, [editingId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  function updateField(field: keyof Invoice, value: any) {
-    setInvoice(prev => ({ ...prev, [field]: value }));
+  function updateField<K extends keyof FormState>(field: K, value: FormState[K]) {
+    setForm((prev) => ({ ...prev, [field]: value }));
   }
-  function updateLine(index: number, field: keyof LineItem, value: any) {
-    setInvoice(prev => {
-      const items = [...prev.lineItems];
+  function updateLine(index: number, field: keyof LineItemForm, value: string) {
+    setForm((prev) => {
+      const items = [...prev.line_items];
       items[index] = { ...items[index], [field]: value };
-      return { ...prev, lineItems: items };
+      return { ...prev, line_items: items };
     });
   }
   function addLine() {
-    setInvoice(prev => ({
-      ...prev,
-      lineItems: [
-        ...prev.lineItems,
-        {
-          id: Date.now().toString(36) + Math.random().toString(36).slice(2),
-          description: '',
-          quantity: 1,
-          rate: 0,
-          taxRate: prev.taxRate || 20,
-        },
-      ],
-    }));
+    setForm((prev) => ({ ...prev, line_items: [...prev.line_items, newLine()] }));
   }
   function removeLine(index: number) {
-    if (invoice.lineItems.length <= 1) { Alert.alert('Error', 'At least one line item required'); return; }
-    setInvoice(prev => ({ ...prev, lineItems: prev.lineItems.filter((_, i) => i !== index) }));
+    if (form.line_items.length <= 1) {
+      Alert.alert('Cannot remove', 'At least one line item is required.');
+      return;
+    }
+    setForm((prev) => ({ ...prev, line_items: prev.line_items.filter((_, i) => i !== index) }));
   }
-  function moveLine(index: number, dir: number) {
-    setInvoice(prev => {
-      const items = [...prev.lineItems];
-      const newIndex = index + dir;
-      if (newIndex < 0 || newIndex >= items.length) return prev;
-      [items[index], items[newIndex]] = [items[newIndex], items[index]];
-      return { ...prev, lineItems: items };
+  function moveLine(index: number, dir: -1 | 1) {
+    setForm((prev) => {
+      const items = [...prev.line_items];
+      const target = index + dir;
+      if (target < 0 || target >= items.length) return prev;
+      [items[index], items[target]] = [items[target], items[index]];
+      return { ...prev, line_items: items };
     });
   }
 
-  function toBackendPayload(inv: Invoice, statusOverride?: Invoice['status']) {
+  function toPayload(): InvoiceInput {
     return {
-      client_id: inv.clientId,
-      status: (statusOverride || inv.status).toLowerCase(),
-      issue_date: inv.date,
-      due_date: inv.dueDate,
-      notes: inv.notes,
-      terms: inv.terms,
-      tax_rate: inv.taxRate,
-      discount_rate: inv.discountRate,
-      retention_rate: inv.retentionRate,
-      cis_rate: inv.cisRate,
-      line_items: inv.lineItems.map(li => ({
-        description: li.description,
-        quantity: li.quantity,
-        unit_price: li.rate,
-      })),
-      invoice_prefix: (inv.invoiceNumber || 'INV').split('-')[0],
-      auto_increment: true,
+      client_id: form.client_id || undefined,
+      status: form.status,
+      issue_date: form.issue_date || undefined,
+      due_date: form.due_date || undefined,
+      tax_rate: toNum(form.tax_rate),
+      discount_rate: toNum(form.discount_rate),
+      retention_rate: toNum(form.retention_rate),
+      cis_rate: toNum(form.cis_rate),
+      notes: form.notes || undefined,
+      terms: form.terms || undefined,
+      line_items: form.line_items
+        .filter((l) => l.description.trim().length > 0)
+        .map((l) => ({
+          description: l.description,
+          quantity: toNum(l.quantity),
+          unit_price: toNum(l.unit_price),
+        })),
+      // Send the prefix only when creating — back end uses it to compute
+      // the next number. Editing keeps the existing invoice_number.
+      invoice_prefix: editingId ? undefined : (form.invoice_number.split('-')[0] || 'INV'),
+      auto_increment: !editingId,
     };
   }
 
-  async function persist(statusOverride?: Invoice['status']) {
-    if (!invoice.toName) { Alert.alert('Error', 'Client name is required'); return null; }
-    const payload = toBackendPayload(invoice, statusOverride);
-    if (params.id) {
-      return api.updateInvoice(params.id as string, payload as any);
+  function validate(): string | null {
+    if (form.line_items.every((l) => !l.description.trim())) {
+      return 'Add at least one line item with a description.';
     }
-    return api.createInvoice(payload as any);
+    return null;
   }
 
   async function saveDraft() {
-    setSaving(true);
-    setError('');
+    const err = validate();
+    if (err) { Alert.alert('Cannot save', err); return; }
+    setSaving(true); setError('');
     try {
-      const saved = await persist('Draft');
-      if (saved) {
-        Alert.alert('Saved', `Invoice ${saved.invoiceNumber} saved as Draft.`);
-        router.replace('/history');
-      }
+      const payload = { ...toPayload(), status: 'draft' as InvoiceStatus };
+      const saved = editingId
+        ? await api.updateInvoice(editingId, payload)
+        : await api.createInvoice(payload);
+      Alert.alert('Saved', `Invoice ${saved.invoice_number} saved as Draft.`);
+      router.replace('/history');
     } catch (e: any) {
-      setError(String(e));
+      setError(e?.message || String(e));
     } finally {
       setSaving(false);
     }
   }
 
   async function sendInvoice() {
-    setSaving(true);
-    setError('');
+    const err = validate();
+    if (err) { Alert.alert('Cannot send', err); return; }
+    setSaving(true); setError('');
     try {
-      const saved = await persist('Sent');
-      if (saved) {
-        Alert.alert('Sent', `Invoice ${saved.invoiceNumber} marked as Sent.`);
-        router.replace('/history');
-      }
+      const payload = toPayload();
+      const saved = editingId
+        ? await api.updateInvoice(editingId, payload)
+        : await api.createInvoice(payload);
+      // Distinct endpoint that flips status to 'sent' + records sent_at.
+      await api.sendInvoice(saved.id);
+      Alert.alert('Sent', `Invoice ${saved.invoice_number} marked as Sent.`);
+      router.replace('/history');
     } catch (e: any) {
-      setError(String(e));
+      setError(e?.message || String(e));
     } finally {
       setSaving(false);
     }
   }
 
   async function markPaid() {
-    if (!invoice.id) return;
-    setSaving(true);
-    setError('');
+    if (!editingId) return;
+    setSaving(true); setError('');
     try {
-      const saved = await api.markPaid(invoice.id);
-      if (saved) {
-        setInvoice(saved);
-        Alert.alert('Updated', `Invoice ${saved.invoiceNumber} marked as Paid.`);
-      }
+      const saved = await api.markInvoicePaid(editingId);
+      setForm((f) => ({ ...f, status: saved.status }));
+      Alert.alert('Updated', `Invoice ${saved.invoice_number} marked as Paid.`);
     } catch (e: any) {
-      setError(String(e));
+      setError(e?.message || String(e));
     } finally {
       setSaving(false);
     }
   }
 
   async function generatePDF() {
-    setPdfLoading(true);
-    setError('');
+    setPdfLoading(true); setError('');
     try {
-      const html = ModernTemplate(invoice, calc);
+      const html = renderInvoiceHtml(form, calc, client);
       const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, { UTI: '.pdf', mimeType: 'application/pdf' });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { UTI: 'com.adobe.pdf', mimeType: 'application/pdf' });
+      } else {
+        Alert.alert('PDF ready', `Saved to ${uri}`);
+      }
     } catch (e: any) {
-      setError(String(e));
+      setError(e?.message || String(e));
     } finally {
       setPdfLoading(false);
     }
@@ -274,49 +273,57 @@ export default function InvoiceBuilderScreen() {
 
   async function runAI() {
     if (!aiPrompt.trim()) return;
-    setAiLoading(true);
-    setError('');
+    setAiLoading(true); setError('');
     try {
-      const data = await generateInvoiceFromPrompt(aiPrompt);
-      setInvoice(prev => ({
+      const draft = await api.generateInvoiceDraft(aiPrompt);
+      const items = Array.isArray(draft.invoice?.items) ? draft.invoice.items : [];
+      setForm((prev) => ({
         ...prev,
-        ...data,
-        lineItems: Array.isArray(data.lineItems)
-          ? data.lineItems.map((li: any, idx: number) => ({
-              id: String(idx + 1),
+        tax_rate: typeof draft.invoice?.taxRate === 'number'
+          ? String(draft.invoice.taxRate)
+          : prev.tax_rate,
+        notes: draft.invoice?.notes || prev.notes,
+        issue_date: draft.invoice?.issueDate || prev.issue_date,
+        due_date: draft.invoice?.dueDate || prev.due_date,
+        line_items: items.length > 0
+          ? items.map((li) => ({
+              id: Date.now().toString(36) + Math.random().toString(36).slice(2),
               description: li.description || '',
-              quantity: Number(li.quantity) || 1,
-              rate: Number(li.rate) || 0,
-              taxRate: li.taxRate ?? prev.taxRate,
+              quantity: String(li.quantity ?? 1),
+              unit_price: String(li.unitPrice ?? 0),
             }))
-          : prev.lineItems,
+          : prev.line_items,
       }));
     } catch (e: any) {
-      setError(`AI Error: ${String(e)}`);
+      setError(`AI Error: ${e?.message || String(e)}`);
+    } finally {
+      setAiLoading(false);
     }
-    setAiLoading(false);
   }
 
-  const selectedTaxName = useMemo(() => {
-    // Simple mapping: use invoice taxRate to pick a name from rules if exact match, else Custom
-    const rule = taxRules.find(r => r.rate === invoice.taxRate);
-    return rule ? rule.name : `${invoice.taxRate}%`;
-  }, [taxRules, invoice.taxRate]);
-
   if (loading) return <LoadingSpinner />;
+
+  const selectedTaxName = (() => {
+    const target = toNum(form.tax_rate);
+    const match = taxRules.find((r) => Math.abs(toNum(r.rate) - target) < 0.001);
+    return match ? match.name : 'Custom';
+  })();
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} className="flex-1">
       <ScrollView className="flex-1 bg-slate-50 p-4">
-        <Text className="text-2xl font-bold text-slate-800 mb-3">{params.id ? 'Edit Invoice' : 'New Invoice'}</Text>
+        <Text className="text-2xl font-bold text-slate-800 mb-3">
+          {editingId ? 'Edit Invoice' : 'New Invoice'}
+        </Text>
 
         {error ? <ErrorToast message={error} /> : null}
 
+        {/* Status row */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
           <Text className="font-bold text-slate-800 mb-2">Status</Text>
           <View className="flex-row items-center justify-between">
-            <StatusBadge status={invoice.status} />
-            {params.id && invoice.status !== 'Paid' && (
+            <StatusBadge status={form.status} />
+            {editingId && form.status !== 'paid' && (
               <TouchableOpacity onPress={markPaid} className="bg-green-600 rounded-lg px-3 py-2 flex-row items-center gap-2">
                 <CheckCircle2 size={14} color="#fff" />
                 <Text className="text-white text-sm font-medium">Mark Paid</Text>
@@ -325,9 +332,15 @@ export default function InvoiceBuilderScreen() {
           </View>
         </View>
 
+        {/* AI assist */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
           <Text className="font-bold text-slate-800 mb-2">AI Assist</Text>
-          <TextInput value={aiPrompt} onChangeText={setAiPrompt} placeholder="Describe the work..." multiline className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 h-20"
+          <TextInput
+            value={aiPrompt}
+            onChangeText={setAiPrompt}
+            placeholder="Describe the work..."
+            multiline
+            className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 h-20"
           />
           <TouchableOpacity onPress={runAI} disabled={aiLoading} className="bg-indigo-600 rounded-lg p-3 items-center flex-row justify-center gap-2">
             <Sparkles size={16} color="#fff" />
@@ -335,61 +348,63 @@ export default function InvoiceBuilderScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Header */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
           <Text className="font-bold text-slate-800 mb-2">Invoice Details</Text>
+
           <Label text="Invoice #" />
-          <TextInput value={invoice.invoiceNumber} onChangeText={v => updateField('invoiceNumber', v)} className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
-          <Label text="Date" />
-          <TextInput value={invoice.date} onChangeText={v => updateField('date', v)} className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
-          <Label text="Due Date" />
-          <TextInput value={invoice.dueDate} onChangeText={v => updateField('dueDate', v)} placeholder="YYYY-MM-DD" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
-          <Label text="From Name" />
-          <TextInput value={invoice.fromName} onChangeText={v => updateField('fromName', v)} className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
-          <Label text="From Email" />
-          <TextInput value={invoice.fromEmail} onChangeText={v => updateField('fromEmail', v)} keyboardType="email-address" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
-          <Label text="From Address" />
-          <TextInput value={invoice.fromAddress} onChangeText={v => updateField('fromAddress', v)} multiline className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 h-16" />
+          <TextInput
+            value={form.invoice_number}
+            onChangeText={(v) => updateField('invoice_number', v)}
+            editable={!editingId}
+            className={`border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 ${editingId ? 'bg-slate-50' : ''}`}
+          />
+
+          <Label text="Issue Date (YYYY-MM-DD)" />
+          <TextInput value={form.issue_date} onChangeText={(v) => updateField('issue_date', v)} className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+
+          <Label text="Due Date (YYYY-MM-DD)" />
+          <TextInput value={form.due_date} onChangeText={(v) => updateField('due_date', v)} className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+
           <Label text="Client" />
-          <ClientPicker selectedId={invoice.clientId} onSelect={(c: Client) => {
-            updateField('clientId', c.id);
-            updateField('toName', c.name);
-            updateField('toEmail', c.email);
-            updateField('toAddress', c.address || '');
-            if (c.vatNumber) updateField('clientVatNumber', c.vatNumber);
-            if (c.defaultTerms) updateField('terms', c.defaultTerms);
-            if (typeof c.defaultTaxRate === 'number') updateField('taxRate', c.defaultTaxRate);
-          }} />
-          <Label text="To Name" />
-          <TextInput value={invoice.toName} onChangeText={v => updateField('toName', v)} className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 mt-1" />
-          <Label text="To Email" />
-          <TextInput value={invoice.toEmail} onChangeText={v => updateField('toEmail', v)} keyboardType="email-address" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
-          <Label text="To Address" />
-          <TextInput value={invoice.toAddress} onChangeText={v => updateField('toAddress', v)} multiline className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 h-16" />
-          <Label text="Client VAT Number" />
-          <TextInput value={invoice.clientVatNumber || ''} onChangeText={v => updateField('clientVatNumber', v)} className="border border-slate-200 rounded-lg px-3 py-2 mb-1 text-slate-800" />
+          <ClientPicker
+            selectedId={form.client_id || undefined}
+            onSelect={(c: Client) => {
+              setClient(c);
+              updateField('client_id', c.id);
+            }}
+          />
+          {client && (
+            <Text className="text-xs text-slate-500 mt-2">
+              {client.email || client.phone || '—'}
+              {client.vat_number ? ` · VAT ${client.vat_number}` : ''}
+            </Text>
+          )}
         </View>
 
+        {/* Line items */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
           <Text className="font-bold text-slate-800 mb-2">Line Items</Text>
-          {invoice.lineItems.map((item, idx) => (
+          {form.line_items.map((item, idx) => (
             <View key={item.id} className="border border-slate-200 rounded-lg p-3 mb-2">
-              <TextInput value={item.description} onChangeText={v => updateLine(idx, 'description', v)} placeholder="Description" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+              <TextInput
+                value={item.description}
+                onChangeText={(v) => updateLine(idx, 'description', v)}
+                placeholder="Description"
+                className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800"
+              />
               <View className="flex-row gap-2 mb-2">
-                <TextInput value={String(item.quantity)} onChangeText={v => updateLine(idx, 'quantity', parseFloat(v) || 0)} keyboardType="numeric" placeholder="Qty" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-slate-800" />
-                <TextInput value={String(item.rate)} onChangeText={v => updateLine(idx, 'rate', parseFloat(v) || 0)} keyboardType="numeric" placeholder="Rate" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-slate-800" />
+                <TextInput value={item.quantity} onChangeText={(v) => updateLine(idx, 'quantity', v)} keyboardType="numeric" placeholder="Qty" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-slate-800" />
+                <TextInput value={item.unit_price} onChangeText={(v) => updateLine(idx, 'unit_price', v)} keyboardType="numeric" placeholder="Unit price" className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-slate-800" />
                 <View className="flex-row items-center">
                   <TouchableOpacity onPress={() => moveLine(idx, -1)} className="p-2"><ArrowUp size={18} color="#64748b" /></TouchableOpacity>
                   <TouchableOpacity onPress={() => moveLine(idx, 1)} className="p-2"><ArrowDown size={18} color="#64748b" /></TouchableOpacity>
                   <TouchableOpacity onPress={() => removeLine(idx)} className="p-2"><Trash2 size={18} color="#dc2626" /></TouchableOpacity>
                 </View>
               </View>
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center gap-2">
-                  <Text className="text-xs text-slate-500">Labor</Text>
-                  <Switch value={!!item.isLabor} onValueChange={v => updateLine(idx, 'isLabor', v)} />
-                </View>
-                <Text className="text-xs text-slate-500">Line tax: {item.taxRate ?? invoice.taxRate}%</Text>
-              </View>
+              <Text className="text-xs text-slate-400 text-right">
+                Line total: {fmtMoney(toNum(item.quantity) * toNum(item.unit_price))}
+              </Text>
             </View>
           ))}
           <TouchableOpacity onPress={addLine} className="bg-slate-100 rounded-lg p-3 items-center flex-row justify-center gap-2">
@@ -398,85 +413,61 @@ export default function InvoiceBuilderScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Tax & discount */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
-          <Text className="font-bold text-slate-800 mb-2">Tax & Discounts</Text>
+          <Text className="font-bold text-slate-800 mb-2">Tax & Adjustments</Text>
+
           <Label text="Tax Rule" />
-          <TouchableOpacity onPress={() => setShowTaxPicker(true)} className="border border-slate-200 rounded-lg px-3 py-2.5 flex-row justify-between items-center bg-white mb-2">
-            <Text className="text-slate-800 text-sm">{selectedTaxName} ({invoice.taxRate}%)</Text>
+          <TouchableOpacity
+            onPress={() => setShowTaxPicker(true)}
+            className="border border-slate-200 rounded-lg px-3 py-2.5 flex-row justify-between items-center bg-white mb-2"
+          >
+            <Text className="text-slate-800 text-sm">
+              {selectedTaxName} ({fmtPercent(form.tax_rate)})
+            </Text>
             <ChevronDown size={16} color="#64748b" />
           </TouchableOpacity>
-          <View className="flex-row items-center justify-between mb-2">
-            <Text className="text-sm text-slate-700">Reverse Charge</Text>
-            <Switch value={invoice.reverseCharge} onValueChange={v => updateField('reverseCharge', v)} />
-          </View>
+
+          <Label text="Tax Rate (%)" />
+          <TextInput value={form.tax_rate} onChangeText={(v) => updateField('tax_rate', v)} keyboardType="numeric" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+
           <Label text="Discount Rate (%)" />
-          <TextInput value={String(invoice.discountRate)} onChangeText={v => updateField('discountRate', parseFloat(v) || 0)} keyboardType="numeric" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+          <TextInput value={form.discount_rate} onChangeText={(v) => updateField('discount_rate', v)} keyboardType="numeric" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+
           <Label text="Retention Rate (%)" />
-          <TextInput value={String(invoice.retentionRate)} onChangeText={v => updateField('retentionRate', parseFloat(v) || 0)} keyboardType="numeric" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+          <TextInput value={form.retention_rate} onChangeText={(v) => updateField('retention_rate', v)} keyboardType="numeric" className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800" />
+
           <Label text="CIS Rate (%)" />
-          <TextInput value={String(invoice.cisRate)} onChangeText={v => updateField('cisRate', parseFloat(v) || 0)} keyboardType="numeric" className="border border-slate-200 rounded-lg px-3 py-2 mb-1 text-slate-800" />
+          <TextInput value={form.cis_rate} onChangeText={(v) => updateField('cis_rate', v)} keyboardType="numeric" className="border border-slate-200 rounded-lg px-3 py-2 mb-1 text-slate-800" />
         </View>
 
+        {/* Summary — live totals */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
           <Text className="font-bold text-slate-800 mb-2">Summary</Text>
-          <View className="flex-row justify-between mb-1">
-            <Text className="text-slate-600">Subtotal:</Text>
-            <Text className="font-medium text-slate-800">£{calc.subtotal.toFixed(2)}</Text>
-          </View>
-          <View className="flex-row justify-between mb-1">
-            <Text className="text-slate-600">Total Tax:</Text>
-            <Text className="font-medium text-slate-800">£{calc.tax.toFixed(2)}</Text>
-          </View>
-          <View className="flex-row justify-between mb-1">
-            <Text className="text-slate-600">Discount:</Text>
-            <Text className="font-medium text-slate-800">-£{calc.discount.toFixed(2)}</Text>
-          </View>
-          <View className="flex-row justify-between mb-1">
-            <Text className="text-slate-600">Retention:</Text>
-            <Text className="font-medium text-slate-800">-£{calc.retention.toFixed(2)}</Text>
-          </View>
-          <View className="flex-row justify-between mb-1">
-            <Text className="text-slate-600">CIS:</Text>
-            <Text className="font-medium text-slate-800">-£{calc.cis.toFixed(2)}</Text>
-          </View>
+          <Row label="Subtotal" value={fmtMoney(calc.subtotal)} />
+          <Row label="Discount" value={`−${fmtMoney(calc.discount)}`} />
+          <Row label="Tax" value={fmtMoney(calc.tax)} />
+          <Row label="Retention" value={`−${fmtMoney(calc.retention)}`} />
+          <Row label="CIS" value={`−${fmtMoney(calc.cis)}`} />
           <View className="border-t border-slate-200 mt-2 pt-2 flex-row justify-between">
-            <Text className="font-bold text-slate-800 text-lg">Total Due:</Text>
-            <Text className="font-bold text-blue-600 text-lg">£{calc.amountDue.toFixed(2)}</Text>
+            <Text className="font-bold text-slate-800 text-lg">Total Due</Text>
+            <Text className="font-bold text-blue-600 text-lg">{fmtMoney(calc.total)}</Text>
           </View>
+          <Text className="text-xs text-slate-400 mt-1">
+            Totals are recomputed server-side on save (DECIMAL(12,2)). UI preview uses the same formula.
+          </Text>
         </View>
 
-        <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
-          <Text className="font-bold text-slate-800 mb-2 flex-row items-center gap-2">
-            <Palette size={16} color="#334155" /> Brand & Template</Text>
-          <View className="flex-row gap-2 mb-3">
-            {COLOR_OPTIONS.map(c => (
-              <TouchableOpacity key={c} onPress={() => updateField('brandColor', c)} className={`w-8 h-8 rounded-full border-2 ${invoice.brandColor === c ? 'border-slate-800' : 'border-transparent'}`} style={{ backgroundColor: c }} />
-            ))}
-          </View>
-          <Label text="Template" />
-          <TouchableOpacity onPress={() => setShowTemplatePicker(true)} className="border border-slate-200 rounded-lg px-3 py-2.5 flex-row justify-between items-center bg-white mb-2">
-            <Text className="text-slate-800 text-sm capitalize">{invoice.template}</Text>
-            <ChevronDown size={16} color="#64748b" />
-          </TouchableOpacity>
-        </View>
-
-        <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
-          <Text className="font-bold text-slate-800 mb-2 flex-row items-center gap-2">
-            <CreditCard size={16} color="#334155" /> Payment Gateway</Text>
-          <TouchableOpacity onPress={() => setShowGatewayPicker(true)} className="border border-slate-200 rounded-lg px-3 py-2.5 flex-row justify-between items-center bg-white">
-            <Text className="text-slate-800 text-sm capitalize">{invoice.paymentGateway}</Text>
-            <ChevronDown size={16} color="#64748b" />
-          </TouchableOpacity>
-        </View>
-
+        {/* Notes & terms */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-3">
           <Text className="font-bold text-slate-800 mb-2">Notes & Terms</Text>
           <Label text="Notes" />
-          <TextInput value={invoice.notes} onChangeText={v => updateField('notes', v)} multiline className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 h-20" />
+          <TextInput value={form.notes} onChangeText={(v) => updateField('notes', v)} multiline className="border border-slate-200 rounded-lg px-3 py-2 mb-2 text-slate-800 h-20" />
           <Label text="Terms" />
-          <TextInput value={invoice.terms} onChangeText={v => updateField('terms', v)} multiline className="border border-slate-200 rounded-lg px-3 py-2 mb-1 text-slate-800 h-20" />
+          <TextInput value={form.terms} onChangeText={(v) => updateField('terms', v)} multiline className="border border-slate-200 rounded-lg px-3 py-2 mb-1 text-slate-800 h-20" />
         </View>
 
+        {/* Actions */}
         <View className="bg-white rounded-xl p-4 shadow-sm mb-6">
           <Text className="font-bold text-slate-800 mb-2">Actions</Text>
           <View className="flex-row gap-2 mb-2">
@@ -496,7 +487,7 @@ export default function InvoiceBuilderScreen() {
         </View>
       </ScrollView>
 
-      {/* Tax Rule Picker Modal */}
+      {/* Tax rule picker */}
       <Modal visible={showTaxPicker} animationType="slide" transparent>
         <View className="flex-1 bg-black/40 justify-end">
           <View className="bg-white rounded-t-xl h-[60%] p-4">
@@ -506,51 +497,26 @@ export default function InvoiceBuilderScreen() {
             </View>
             <FlatList
               data={taxRules}
-              keyExtractor={r => r.id}
+              keyExtractor={(r) => r.id}
               renderItem={({ item }) => (
-                <TouchableOpacity onPress={() => { updateField('taxRate', item.rate); setShowTaxPicker(false); }} className="py-3 border-b border-slate-100 flex-row justify-between">
-                  <Text className="text-slate-800 font-medium">{item.name} ({item.rate}%)</Text>
-                  <Text className="text-slate-500 text-xs">{item.description}</Text>
+                <TouchableOpacity
+                  onPress={() => { updateField('tax_rate', item.rate); setShowTaxPicker(false); }}
+                  className="py-3 border-b border-slate-100 flex-row justify-between"
+                >
+                  <Text className="text-slate-800 font-medium">
+                    {item.name} ({fmtPercent(item.rate)})
+                  </Text>
+                  <Text className="text-slate-500 text-xs">
+                    {item.type}{item.country ? ` · ${item.country}` : ''}
+                  </Text>
                 </TouchableOpacity>
               )}
-              ListEmptyComponent={<Text className="text-slate-400 text-center mt-8">No tax rules available</Text>}
+              ListEmptyComponent={
+                <Text className="text-slate-400 text-center mt-8">
+                  No tax rules — add one from the Taxes tab.
+                </Text>
+              }
             />
-          </View>
-        </View>
-      </Modal>
-
-      {/* Template Picker Modal */}
-      <Modal visible={showTemplatePicker} animationType="slide" transparent>
-        <View className="flex-1 bg-black/40 justify-end">
-          <View className="bg-white rounded-t-xl h-[40%] p-4">
-            <View className="flex-row justify-between items-center mb-3">
-              <Text className="text-lg font-bold text-slate-800">Select Template</Text>
-              <TouchableOpacity onPress={() => setShowTemplatePicker(false)}><X size={20} color="#334155" /></TouchableOpacity>
-            </View>
-            {TEMPLATES.map(t => (
-              <TouchableOpacity key={t} onPress={() => { updateField('template', t); setShowTemplatePicker(false); }} className="py-3 border-b border-slate-100 flex-row items-center gap-2">
-                <Layout size={16} color="#64748b" />
-                <Text className="text-slate-800 font-medium capitalize">{t}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Gateway Picker Modal */}
-      <Modal visible={showGatewayPicker} animationType="slide" transparent>
-        <View className="flex-1 bg-black/40 justify-end">
-          <View className="bg-white rounded-t-xl h-[40%] p-4">
-            <View className="flex-row justify-between items-center mb-3">
-              <Text className="text-lg font-bold text-slate-800">Select Payment Gateway</Text>
-              <TouchableOpacity onPress={() => setShowGatewayPicker(false)}><X size={20} color="#334155" /></TouchableOpacity>
-            </View>
-            {GATEWAYS.map(g => (
-              <TouchableOpacity key={g} onPress={() => { updateField('paymentGateway', g); setShowGatewayPicker(false); }} className="py-3 border-b border-slate-100 flex-row items-center gap-2">
-                <CreditCard size={16} color="#64748b" />
-                <Text className="text-slate-800 font-medium capitalize">{g}</Text>
-              </TouchableOpacity>
-            ))}
           </View>
         </View>
       </Modal>
@@ -559,7 +525,129 @@ export default function InvoiceBuilderScreen() {
 }
 
 function Label({ text }: { text: string }) {
+  return <Text className="text-xs text-slate-500 mb-1 mt-1">{text}</Text>;
+}
+
+function Row({ label, value }: { label: string; value: string }) {
   return (
-    <Text className="text-xs text-slate-500 mb-1 mt-1">{text}</Text>
+    <View className="flex-row justify-between mb-1">
+      <Text className="text-slate-600">{label}</Text>
+      <Text className="font-medium text-slate-800">{value}</Text>
+    </View>
   );
+}
+
+// ───── helpers ─────
+
+function invoiceToForm(inv: InvoiceFull): FormState {
+  return {
+    invoice_id: inv.id,
+    client_id: inv.client_id,
+    invoice_number: inv.invoice_number,
+    issue_date: inv.issue_date || TODAY(),
+    due_date: inv.due_date || ADD_30(),
+    notes: inv.notes || '',
+    terms: inv.terms || 'Payment due within 30 days.',
+    tax_rate: inv.tax_rate,
+    discount_rate: inv.discount_rate,
+    retention_rate: inv.retention_rate,
+    cis_rate: inv.cis_rate,
+    status: inv.status,
+    line_items: (inv.line_items || []).length > 0
+      ? inv.line_items.map((li) => ({
+          id: li.id,
+          description: li.description,
+          quantity: li.quantity,
+          unit_price: li.unit_price,
+        }))
+      : [newLine()],
+  };
+}
+
+interface CalcSnapshot {
+  subtotal: number;
+  discount: number;
+  taxable: number;
+  tax: number;
+  retention: number;
+  cis: number;
+  total: number;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderInvoiceHtml(form: FormState, calc: CalcSnapshot, client: Client | null): string {
+  const rows = form.line_items
+    .filter((l) => l.description.trim())
+    .map((l) => {
+      const qty = toNum(l.quantity);
+      const price = toNum(l.unit_price);
+      return `<tr>
+        <td>${escapeHtml(l.description)}</td>
+        <td style="text-align:right">${qty}</td>
+        <td style="text-align:right">${fmtMoney(price)}</td>
+        <td style="text-align:right">${fmtMoney(qty * price)}</td>
+      </tr>`;
+    })
+    .join('');
+
+  const clientBlock = client
+    ? `<h3>${escapeHtml(client.name)}</h3>
+       ${client.email ? `<p>${escapeHtml(client.email)}</p>` : ''}
+       ${client.vat_number ? `<p>VAT: ${escapeHtml(client.vat_number)}</p>` : ''}`
+    : '<h3>(No client selected)</h3>';
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body { font-family: -apple-system, system-ui, sans-serif; color: #1e293b; padding: 32px; }
+    h1 { font-size: 2em; color: #2563eb; margin: 0; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 32px; }
+    .meta { text-align: right; color: #475569; font-size: 0.9em; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    th { background: #f1f5f9; font-weight: 600; }
+    .totals { width: 280px; margin-left: auto; }
+    .totals td { padding: 6px 10px; border: none; }
+    .total { font-weight: bold; font-size: 1.2em; color: #2563eb; border-top: 1px solid #cbd5e1; }
+    .footer { margin-top: 32px; color: #64748b; font-size: 0.9em; }
+  </style></head><body>
+    <div class="header">
+      <div>
+        <h1>INVOICE</h1>
+        <p>#${escapeHtml(form.invoice_number)}</p>
+      </div>
+      <div class="meta">
+        <p>Issued: ${escapeHtml(form.issue_date)}</p>
+        <p>Due: ${escapeHtml(form.due_date)}</p>
+      </div>
+    </div>
+
+    <h4>Bill to</h4>
+    ${clientBlock}
+
+    <table>
+      <thead>
+        <tr><th>Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit</th><th style="text-align:right">Amount</th></tr>
+      </thead>
+      <tbody>${rows || '<tr><td colspan="4">No line items</td></tr>'}</tbody>
+    </table>
+
+    <table class="totals">
+      <tr><td>Subtotal</td><td style="text-align:right">${fmtMoney(calc.subtotal)}</td></tr>
+      <tr><td>Discount</td><td style="text-align:right">−${fmtMoney(calc.discount)}</td></tr>
+      <tr><td>Tax</td><td style="text-align:right">${fmtMoney(calc.tax)}</td></tr>
+      ${calc.retention > 0 ? `<tr><td>Retention</td><td style="text-align:right">−${fmtMoney(calc.retention)}</td></tr>` : ''}
+      ${calc.cis > 0 ? `<tr><td>CIS</td><td style="text-align:right">−${fmtMoney(calc.cis)}</td></tr>` : ''}
+      <tr class="total"><td>Total Due</td><td style="text-align:right">${fmtMoney(calc.total)}</td></tr>
+    </table>
+
+    ${form.notes ? `<div class="footer"><strong>Notes:</strong><br/>${escapeHtml(form.notes).replace(/\n/g, '<br/>')}</div>` : ''}
+    ${form.terms ? `<div class="footer"><strong>Terms:</strong><br/>${escapeHtml(form.terms).replace(/\n/g, '<br/>')}</div>` : ''}
+  </body></html>`;
 }
