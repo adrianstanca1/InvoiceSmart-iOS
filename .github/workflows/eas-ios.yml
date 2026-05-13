@@ -1,8 +1,10 @@
 name: Build iOS with EAS
 
 on:
-  push:
-    branches: [main]
+  # Disabled: EAS free plan exhausted until June 1, 2026 (same constraint as cortexbuildpro).
+  # Re-enable by uncommenting once the plan resets or a paid plan is configured.
+  # push:
+  #   branches: [main]
   workflow_dispatch:
 
 jobs:
