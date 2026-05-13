@@ -8,9 +8,7 @@ import * as Sharing from 'expo-sharing';
 import { Download, FileText } from 'lucide-react-native';
 import { DateRangePicker } from '../../components/DateRangePicker';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
-import {
-  getReportsProfitLoss, getTopExpenses, getTaxEstimate, getRevenueByClient,
-} from '../../services/api';
+import { getReportsProfitLoss, getTopExpenses, getTaxEstimate, getRevenueByClient, exportReport } from '../../services/api';
 
 const screenWidth = 380;
 const COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#9333ea', '#0ea5e9'];
@@ -18,11 +16,7 @@ const COLORS = ['#2563eb', '#16a34a', '#f59e0b', '#dc2626', '#9333ea', '#0ea5e9'
 export default function ReportsScreen() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [pnl, setPnl] = useState<{
-    revenue: number; costOfSales: number; grossProfit: number;
-    expenses: { category: string; amount: number }[];
-    totalExpenses: number; netProfit: number;
-  } | null>(null);
+  const [pnl, setPnl] = useState<any>(null);
   const [revenueByClient, setRevenueByClient] = useState<{ clientName: string; revenue: number }[]>([]);
   const [topExpenses, setTopExpenses] = useState<{ category: string; amount: number }[]>([]);
   const [taxEst, setTaxEst] = useState<{ vatDue: number; corporationTax: number } | null>(null);
@@ -37,7 +31,7 @@ export default function ReportsScreen() {
         getTopExpenses(startDate || '2020-01-01', endDate || '2030-12-31'),
         getTaxEstimate(startDate || '2020-01-01', endDate || '2030-12-31'),
       ]);
-      setPnl(pnlRes);
+      setPnl((pnlRes as any) || null);
       setRevenueByClient(rev);
       setTopExpenses(exp);
       setTaxEst(tax);
@@ -67,17 +61,13 @@ export default function ReportsScreen() {
     }
   }
 
-  if (loading && !pnl) return <LoadingSpinner message="Loading reports..." />;
+  if (loading && !pnl) return <View className="flex-1 justify-center items-center"><ActivityIndicator size="large" color="#2563eb" /><Text className="text-slate-400 mt-3">Loading reports...</Text></View>;
 
   return (
     <ScrollView className="flex-1 bg-slate-50 p-4">
       <Text className="text-2xl font-bold text-slate-800 mb-3">Reports</Text>
 
-      <DateRangePicker
-        startDate={startDate}
-        endDate={endDate}
-        onChange={({ startDate: sd, endDate: ed }) => { setStartDate(sd); setEndDate(ed); }}
-      />
+      <DateRangePicker startDate={startDate} endDate={endDate} onChangeStart={setStartDate} onChangeEnd={setEndDate} />
 
       <TouchableOpacity onPress={load} className="bg-blue-600 rounded-lg py-2 items-center mb-4">
         <Text className="text-white font-medium">Refresh Reports</Text>
@@ -104,9 +94,11 @@ export default function ReportsScreen() {
             data={{
               labels: monthlyRevenue.map((r) => r.clientName.slice(0, 8)),
               datasets: [{ data: monthlyRevenue.map((r) => r.revenue) }],
-            }}
+            } as any}
             width={screenWidth}
             height={220}
+            yAxisLabel="$"
+            yAxisSuffix=""
             chartConfig={{
               backgroundColor: '#fff',
               backgroundGradientFrom: '#fff',
@@ -114,7 +106,7 @@ export default function ReportsScreen() {
               decimalPlaces: 0,
               color: (o = 1) => `rgba(37,99,235,${o})`,
               labelColor: () => '#64748b',
-            }}
+            } as any}
             style={{ borderRadius: 12 }}
           />
         </View>

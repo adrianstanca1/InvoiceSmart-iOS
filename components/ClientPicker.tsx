@@ -19,7 +19,7 @@ export function ClientPicker({
   useEffect(() => {
     if (visible) {
       setLoading(true);
-      api.getClients().then(setClients).finally(() => setLoading(false));
+      api.getClients().then(res => setClients((res as any).data || [])).finally(() => setLoading(false));
     }
   }, [visible]);
 

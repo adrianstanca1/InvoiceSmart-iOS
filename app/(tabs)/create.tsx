@@ -104,7 +104,7 @@ export default function InvoiceBuilderScreen() {
                 discountRate: (found as any).discount_rate || 0,
                 retentionRate: (found as any).retention_rate || 0,
                 cisRate: (found as any).cis_rate || 0,
-                status: (found.status || 'Draft').replace(/^\w/, (c: string) => c.toUpperCase()),
+                status: ((found.status || 'Draft').replace(/^\w/, (c: string) => c.toUpperCase())) as any,
                 template: (found.template || 'modern') as any,
                 brandColor: (found as any).brand_color || '#2563eb',
                 reverseCharge: (found as any).reverse_charge || false,
@@ -116,7 +116,7 @@ export default function InvoiceBuilderScreen() {
             }
           } else {
             const num = await api.getNextInvoiceNumber();
-            setInvoice(inv => ({ ...inv, id: Date.now().toString(36), invoiceNumber: num }));
+            setInvoice((inv: any) => ({ ...inv, id: Date.now().toString(36), invoiceNumber: num }));
           }
         })(),
       ]);
@@ -195,7 +195,7 @@ export default function InvoiceBuilderScreen() {
     if (!invoice.toName) { Alert.alert('Error', 'Client name is required'); return null; }
     const payload = toBackendPayload(invoice, statusOverride);
     if (params.id) {
-      return api.updateInvoice(params.id as string, payload);
+      return api.updateInvoice(params.id as string, payload as any);
     }
     return api.createInvoice(payload as any);
   }

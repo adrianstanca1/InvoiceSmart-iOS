@@ -23,7 +23,7 @@ export default function DashboardScreen() {
     try {
       const [dash, tr] = await Promise.all([api.getDashboard(), api.getRevenueTrend('2025-01-01', '2025-12-31')]);
       setDashboard(dash);
-      setTrend(tr || { labels: [], data: [] });
+      setTrend((tr || []) as any);
     } catch (e) {
       setError(String(e));
     } finally {

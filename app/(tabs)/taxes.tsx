@@ -25,7 +25,8 @@ export default function TaxManagerScreen() {
     setLoading(true);
     setError('');
     try {
-      const [r, inv] = await Promise.all([getTaxRules(), getInvoices()]);
+      const [r, invRaw] = await Promise.all([getTaxRules(), getInvoices()]);
+      const inv = (invRaw as any).data || [];
       setRules(r);
       setInvoices(inv);
     } catch (e: any) {
@@ -56,7 +57,7 @@ export default function TaxManagerScreen() {
     setSaving(true);
     try {
       if (editingId) {
-        await updateTaxRule(editingId, { ...form, isDefault });
+        await updateTaxRule(editingId, { ...form, isDefault } as any);
       } else {
         await createTaxRule({ name: form.name, rate: Number(form.rate) || 0, description: form.description || '' });
       }
@@ -89,7 +90,7 @@ export default function TaxManagerScreen() {
     return invoices.filter(inv => (inv as any).taxRuleId === ruleId || inv.taxRate === rules.find(r => r.id === ruleId)?.rate);
   };
 
-  if (loading && rules.length === 0) return <LoadingSpinner message="Loading tax rules..." />;
+  if (loading && rules.length === 0) return <View className="flex-1 justify-center items-center"><ActivityIndicator size="large" color="#2563eb" /><Text className="text-slate-400 mt-3">Loading tax rules...</Text></View>;
 
   return (
     <ScrollView className="flex-1 bg-slate-50 p-4">

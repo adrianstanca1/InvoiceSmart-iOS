@@ -153,7 +153,7 @@ export default function LedgerScreen() {
     }
     setUploadingReceipt(true);
     try {
-      const res = await uploadReceipt(b64);
+      const res = await uploadReceipt(b64) as any;
       if (res.error) {
         Alert.alert('Upload failed', res.error);
       } else {
@@ -171,7 +171,7 @@ export default function LedgerScreen() {
   }
 
   if (loading && transactions.length === 0) {
-    return <LoadingSpinner message="Loading ledger..." />;
+    return <View className="flex-1 justify-center items-center"><ActivityIndicator size="large" color="#2563eb" /><Text className="text-slate-400 mt-3">Loading ledger...</Text></View>;
   }
 
   return (
@@ -215,7 +215,7 @@ export default function LedgerScreen() {
             className="flex-1 ml-2 border border-slate-200 rounded-lg px-3 py-2 text-slate-800"
           />
         </View>
-        <DateRangePicker startDate={dateRange.startDate} endDate={dateRange.endDate} onChange={setDateRange} />
+        <DateRangePicker startDate={dateRange.startDate} endDate={dateRange.endDate} onChangeStart={(v) => setDateRange(prev => ({ ...prev, startDate: v }))} onChangeEnd={(v) => setDateRange(prev => ({ ...prev, endDate: v }))} />
         <TouchableOpacity onPress={load} className="bg-blue-600 rounded-lg py-2 items-center">
           <Text className="text-white font-medium">Apply Filters</Text>
         </TouchableOpacity>
