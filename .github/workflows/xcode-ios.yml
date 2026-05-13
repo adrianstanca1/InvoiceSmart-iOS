@@ -29,18 +29,15 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "${{ secrets.IOS_DISTRIBUTION_P12 }}" | base64 -d > /tmp/ios_dist.p12
           echo "${{ secrets.IOS_PROVISIONING_PROFILE }}" | base64 -d > "$HOME/Library/MobileDevice/Provisioning Profiles/3cecb2b9-bb5f-453a-abd0-b4a63f03be2c.mobileprovision"
-          echo "${{ secrets.IOS_DISTRIBUTION_KEY }}" | base64 -d > /tmp/ios_dist.key
-          echo "${{ secrets.IOS_DISTRIBUTION_CERT }}" | base64 -d > /tmp/ios_dist.crt
           security create-keychain -p "buildtrack123" build.keychain
           security unlock-keychain -p "buildtrack123" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
-          security import /tmp/ios_dist.key -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t priv
-          security import /tmp/ios_dist.crt -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t cert
+          security import /tmp/ios_dist.p12 -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t privKeys -t certs
           security list-keychains -s ~/Library/Keychains/build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "buildtrack123" build.keychain || true
 
       - name: Prebuild Xcode project
-        run: npx expo prebuild --platform ios --non-interactive || true
+        run: npx expo prebuild --platform ios --non-interactive
 
       - name: Build iOS Archive
         run: |

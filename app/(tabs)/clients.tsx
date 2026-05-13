@@ -10,7 +10,7 @@ export default function ClientsScreen() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Client>({ id: '', name: '', email: '', phone: '', address: '' });
 
-  useFocusEffect(useCallback(() =>> { load(); }, []));
+  useFocusEffect(useCallback(() => { load(); }, []));
   async function load() { const c = await Storage.getClients(); setClients(c); }
 
   async function saveClient() {
