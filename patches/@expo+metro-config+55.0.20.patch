@@ -1,0 +1,17 @@
+diff --git a/node_modules/@expo/metro-config/build/serializer/exportHermes.js b/node_modules/@expo/metro-config/build/serializer/exportHermes.js
+index dbde56a..2202f04 100644
+--- a/node_modules/@expo/metro-config/build/serializer/exportHermes.js
++++ b/node_modules/@expo/metro-config/build/serializer/exportHermes.js
+@@ -16,7 +16,11 @@ const debug = require('debug')('expo:metro:hermes');
+ function importHermesCommandFromProject(projectRoot) {
+     const platformExecutable = getHermesCommandPlatform();
+     const reactNativeRoot = path_1.default.dirname((0, resolve_from_1.default)(projectRoot, 'react-native/package.json'));
+-    const hermesCompilerRoot = path_1.default.dirname((0, resolve_from_1.default)(reactNativeRoot, 'hermes-compiler/package.json'));
++    let hermesCompilerRoot = '';
++    try {
++        hermesCompilerRoot = path_1.default.dirname((0, resolve_from_1.default)(reactNativeRoot, 'hermes-compiler/package.json'));
++    }
++    catch { }
+     const hermescPaths = [
+         // Override hermesc dir by environment variables
+         process_1.default.env['REACT_NATIVE_OVERRIDE_HERMES_DIR']
