@@ -26,6 +26,10 @@ jobs:
       - name: Expo Prebuild
         run: npx expo prebuild --platform ios --non-interactive
 
+      - name: Disable RNS_GAMMA_ENABLED (fix Xcode 16 build)
+        run: |
+          sed -i '' 's/RNS_GAMMA_ENABLED.*||=.*\x271\x27/RNS_GAMMA_ENABLED ||= '\''0'\''/' ios/Podfile
+
       - name: Pod Install
         run: cd ios && pod install
 
