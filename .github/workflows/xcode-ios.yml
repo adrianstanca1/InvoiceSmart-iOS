@@ -26,9 +26,9 @@ jobs:
 
       - name: Setup Signing
         run: |
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           echo "${{ secrets.IOS_DISTRIBUTION_P12 }}" | base64 -d > /tmp/ios_dist.p12
-          echo "${{ secrets.IOS_PROVISIONING_PROFILE }}" | base64 -d > "~/Library/MobileDevice/Provisioning\ Profiles/3cecb2b9-bb5f-453a-abd0-b4a63f03be2c.mobileprovision"
+          echo "${{ secrets.IOS_PROVISIONING_PROFILE }}" | base64 -d > "$HOME/Library/MobileDevice/Provisioning Profiles/3cecb2b9-bb5f-453a-abd0-b4a63f03be2c.mobileprovision"
           echo "${{ secrets.IOS_DISTRIBUTION_KEY }}" | base64 -d > /tmp/ios_dist.key
           echo "${{ secrets.IOS_DISTRIBUTION_CERT }}" | base64 -d > /tmp/ios_dist.crt
           security create-keychain -p "buildtrack123" build.keychain
