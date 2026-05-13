@@ -31,6 +31,13 @@
     },
     "plugins": [
       "expo-router"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1f428e60-ba3b-4467-be27-559783701b0f"
+      }
+    },
+    "owner": "adrianstanca"
   }
 }
