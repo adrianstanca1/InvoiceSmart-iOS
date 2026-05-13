@@ -1,39 +1,56 @@
+// REST client for the InvoiceSmart backend.
+//
+// Contract: every response shape mirrors `InvoiceSmart-backend/src/openapi.yaml`.
+//   - Entity routes return either a bare object or `{ data, pagination }`.
+//   - Auth returns `{ token, user: { id, email } }`.
+//   - Reports/AI return computed camelCase payloads.
+//
+// We DO NOT unwrap `response.data.data` — the backend never used the
+// `{success,data}` envelope. The interceptor only handles 401 redirect.
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import {
-  ApiResponse, User, Invoice, InvoiceFilters, Client, Transaction,
-  TransactionFilters, TaxRule, FinancialReport, DashboardStats, RevenueTrendPoint,
-  TopExpense, TaxEstimate, AuditLog, AuditLogFilters, AIChatMessage, AppSettings,
-  ReceiptUploadResponse, ReportExportResponse, InvoiceAuditResult, FinancialInsight,
+import type {
+  AuthResponse, UserProfile,
+  Client, ClientInput,
+  Invoice, InvoiceFull, InvoiceInput, InvoiceFilters,
+  Transaction, TransactionInput, TransactionFilters,
+  TaxRule, TaxRuleInput,
+  AuditLog, AuditLogFilters,
+  AppSettings,
+  DashboardStats, RevenueTrendPoint, ProfitLossReport,
+  TopExpense, TaxEstimate, RevenueByClient, ReportsSummary,
+  AiConfig, AiChatResponse, AiGeneratedInvoice,
+  FinancialInsight, TaxAdvice, InvoiceAuditResult, WhoOwesMeResponse,
+  HealthResponse, ReceiptUploadResponse, ReportExportResponse,
+  Paginated,
 } from '../types';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://invoice.cortexbuildpro.com';
+// Resolution order:
+//   1. EXPO_PUBLIC_API_URL (Expo only loads EXPO_PUBLIC_* env vars into
+//      the JS bundle — anything else in .env is invisible at runtime).
+//   2. Production default — the real backend host.
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ||
+  'https://api.invoicesmart.cortexbuildpro.com';
 
 const api: AxiosInstance = axios.create({
   baseURL: `${API_BASE_URL}/api`,
   timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// Request interceptor: attach Bearer token
-api.interceptors.request.use(
-  async (config) => {
-    const token = await AsyncStorage.getItem('auth_token');
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+api.interceptors.request.use(async (config) => {
+  const token = await AsyncStorage.getItem('auth_token');
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
-// Response interceptor: handle 401
 api.interceptors.response.use(
-  (response) => response,
-  async (error: AxiosError<ApiResponse<any>>) => {
+  (r) => r,
+  async (error: AxiosError) => {
     if (error.response?.status === 401) {
       await AsyncStorage.removeItem('auth_token');
       router.replace('/auth/login');
@@ -42,88 +59,87 @@ api.interceptors.response.use(
   }
 );
 
-// Offline fallback helpers
+// ─────────────── Offline cache (best-effort) ──────────────────
+
 async function offlineFallback<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   try {
     const result = await fetcher();
     await AsyncStorage.setItem(`offline_${key}`, JSON.stringify(result));
     return result;
-  } catch (error) {
+  } catch (err) {
     const cached = await AsyncStorage.getItem(`offline_${key}`);
-    if (cached) {
-      return JSON.parse(cached) as T;
-    }
-    throw error;
+    if (cached) return JSON.parse(cached) as T;
+    throw err;
   }
 }
 
-async function queueOfflineAction(key: string, payload: any) {
+async function queueOfflineAction(key: string, payload: unknown): Promise<void> {
   const existing = await AsyncStorage.getItem('offline_queue');
-  const queue = existing ? JSON.parse(existing) : [];
+  const queue = existing ? (JSON.parse(existing) as unknown[]) : [];
   queue.push({ key, payload, timestamp: new Date().toISOString() });
+  // Cap queue at the most recent 100 entries
   await AsyncStorage.setItem('offline_queue', JSON.stringify(queue.slice(-100)));
 }
 
-// Generic request wrappers with fallback support
-async function get<T>(url: string, config?: AxiosRequestConfig, fallbackKey?: string): Promise<T> {
-  const fetcher = () => api.get<ApiResponse<T>>(url, config).then((r) => r.data.data);
-  if (fallbackKey) {
-    return offlineFallback(fallbackKey, fetcher);
-  }
-  return fetcher();
+// ──────────────────── Bare HTTP helpers ────────────────────
+
+async function getRaw<T>(url: string, config?: AxiosRequestConfig, fallbackKey?: string): Promise<T> {
+  const fetcher = () => api.get<T>(url, config).then((r) => r.data);
+  return fallbackKey ? offlineFallback(fallbackKey, fetcher) : fetcher();
 }
 
-async function post<T>(url: string, data?: any, config?: AxiosRequestConfig, fallbackKey?: string): Promise<T> {
-  const fetcher = () => api.post<ApiResponse<T>>(url, data, config).then((r) => r.data.data);
-  if (fallbackKey) {
-    return offlineFallback(fallbackKey, fetcher);
-  }
-  return fetcher();
+async function postRaw<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  return api.post<T>(url, data, config).then((r) => r.data);
 }
 
-async function put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-  return api.put<ApiResponse<T>>(url, data, config).then((r) => r.data.data);
+async function putRaw<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  return api.put<T>(url, data, config).then((r) => r.data);
 }
 
-async function patchReq<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
-  return api.patch<ApiResponse<T>>(url, data, config).then((r) => r.data.data);
+async function patchRaw<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+  return api.patch<T>(url, data, config).then((r) => r.data);
 }
 
-async function del<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-  return api.delete<ApiResponse<T>>(url, config).then((r) => r.data.data);
+async function delRaw<T = void>(url: string, config?: AxiosRequestConfig): Promise<T> {
+  return api.delete<T>(url, config).then((r) => r.data);
 }
 
-// ─── Auth ───
-export async function login(email: string, password: string): Promise<{ token: string; user: User }> {
-  const res = await api.post<ApiResponse<{ token: string; user: User }>>('/auth/login', { email, password });
-  const { token, user } = res.data.data;
-  await AsyncStorage.setItem('auth_token', token);
-  await AsyncStorage.setItem('user', JSON.stringify(user));
-  return { token, user };
+// ──────────────────────────── Health ────────────────────────────
+
+export function getHealth(): Promise<HealthResponse> {
+  // Health is mounted under /api/health (and a top-level /health alias).
+  return getRaw<HealthResponse>('/health');
 }
 
-export async function register(email: string, password: string, name: string): Promise<{ token: string; user: User }> {
-  const res = await api.post<ApiResponse<{ token: string; user: User }>>('/auth/register', { email, password, name });
-  const { token, user } = res.data.data;
-  await AsyncStorage.setItem('auth_token', token);
-  await AsyncStorage.setItem('user', JSON.stringify(user));
-  return { token, user };
+// ───────────────────────────── Auth ─────────────────────────────
+
+export async function login(email: string, password: string): Promise<AuthResponse> {
+  const res = await postRaw<AuthResponse>('/auth/login', { email, password });
+  await AsyncStorage.setItem('auth_token', res.token);
+  await AsyncStorage.setItem('user', JSON.stringify(res.user));
+  return res;
 }
 
-export async function getUser(): Promise<User | null> {
+export interface RegisterPayload {
+  email: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+  company_name?: string;
+  vat_number?: string;
+  phone?: string;
+}
+
+export async function register(payload: RegisterPayload): Promise<AuthResponse> {
+  const res = await postRaw<AuthResponse>('/auth/register', payload);
+  await AsyncStorage.setItem('auth_token', res.token);
+  await AsyncStorage.setItem('user', JSON.stringify(res.user));
+  return res;
+}
+
+export async function getCurrentUser(): Promise<UserProfile | null> {
   try {
-    const cached = await AsyncStorage.getItem('user');
-    if (cached) {
-      const parsed = JSON.parse(cached) as User;
-      // Refresh in background
-      api.get<ApiResponse<User>>('/auth/me').then((res) => {
-        AsyncStorage.setItem('user', JSON.stringify(res.data.data));
-      }).catch(() => {});
-      return parsed;
-    }
-    const res = await api.get<ApiResponse<User>>('/auth/me');
-    await AsyncStorage.setItem('user', JSON.stringify(res.data.data));
-    return res.data.data;
+    return await getRaw<UserProfile>('/auth/me');
   } catch {
     return null;
   }
@@ -135,27 +151,32 @@ export async function logout(): Promise<void> {
   router.replace('/auth/login');
 }
 
-// ─── Invoices ───
-export async function getInvoices(params?: InvoiceFilters): Promise<{ data: Invoice[]; pagination: import('../types').Pagination }> {
-  return get('/invoices', { params }, 'invoices');
+// ─────────────────────────── Invoices ───────────────────────────
+
+export function getInvoices(params?: InvoiceFilters): Promise<Paginated<Invoice>> {
+  return getRaw<Paginated<Invoice>>('/invoices', { params }, 'invoices');
 }
 
-export async function getInvoice(id: string): Promise<Invoice> {
-  return get(`/invoices/${id}`, undefined, `invoice_${id}`);
+export function getInvoice(id: string): Promise<InvoiceFull> {
+  return getRaw<InvoiceFull>(`/invoices/${id}`, undefined, `invoice_${id}`);
 }
 
-export async function createInvoice(data: Partial<Invoice>): Promise<Invoice> {
+export function getNextInvoiceNumber(prefix?: string): Promise<{ invoiceNumber: string }> {
+  return getRaw<{ invoiceNumber: string }>('/invoices/next/number', { params: { prefix } });
+}
+
+export async function createInvoice(data: InvoiceInput): Promise<Invoice> {
   try {
-    return await post('/invoices', data);
+    return await postRaw<Invoice>('/invoices', data);
   } catch (e) {
     await queueOfflineAction('create_invoice', data);
     throw e;
   }
 }
 
-export async function updateInvoice(id: string, data: Partial<Invoice>): Promise<Invoice> {
+export async function updateInvoice(id: string, data: InvoiceInput): Promise<Invoice> {
   try {
-    return await put(`/invoices/${id}`, data);
+    return await putRaw<Invoice>(`/invoices/${id}`, data);
   } catch (e) {
     await queueOfflineAction('update_invoice', { id, data });
     throw e;
@@ -164,46 +185,58 @@ export async function updateInvoice(id: string, data: Partial<Invoice>): Promise
 
 export async function deleteInvoice(id: string): Promise<void> {
   try {
-    await del(`/invoices/${id}`);
+    await delRaw(`/invoices/${id}`);
   } catch (e) {
     await queueOfflineAction('delete_invoice', { id });
     throw e;
   }
 }
 
-export async function sendInvoice(id: string): Promise<void> {
-  return post(`/invoices/${id}/send`, {});
+export function sendInvoice(id: string): Promise<{ success: boolean; status: 'sent' }> {
+  return postRaw(`/invoices/${id}/send`, {});
 }
 
-export async function markPaid(id: string): Promise<Invoice> {
-  return patchReq(`/invoices/${id}/paid`, {});
+export function markInvoicePaid(id: string): Promise<Invoice> {
+  return patchRaw<Invoice>(`/invoices/${id}/paid`, {});
 }
 
-export async function generatePdf(id: string): Promise<{ url: string }> {
-  return get(`/invoices/${id}/pdf`);
+export interface PaymentInput {
+  amount: number;
+  payment_method?: string;
+  reference?: string;
+  notes?: string;
 }
 
-// ─── Clients ───
-export async function getClients(params?: { page?: number; limit?: number; search?: string }): Promise<{ data: Client[]; pagination: import('../types').Pagination }> {
-  return get('/clients', { params }, 'clients');
+export function recordPayment(id: string, payload: PaymentInput): Promise<{ success: boolean }> {
+  return postRaw(`/invoices/${id}/payments`, payload);
 }
 
-export async function getClient(id: string): Promise<Client> {
-  return get(`/clients/${id}`, undefined, `client_${id}`);
+export function getInvoicePdfUrl(id: string): Promise<{ url: string }> {
+  return getRaw<{ url: string }>(`/invoices/${id}/pdf`);
 }
 
-export async function createClient(data: Partial<Client>): Promise<Client> {
+// ─────────────────────────── Clients ───────────────────────────
+
+export function getClients(): Promise<Paginated<Client>> {
+  return getRaw<Paginated<Client>>('/clients', undefined, 'clients');
+}
+
+export function getClient(id: string): Promise<Client> {
+  return getRaw<Client>(`/clients/${id}`, undefined, `client_${id}`);
+}
+
+export async function createClient(data: ClientInput): Promise<Client> {
   try {
-    return await post('/clients', data);
+    return await postRaw<Client>('/clients', data);
   } catch (e) {
     await queueOfflineAction('create_client', data);
     throw e;
   }
 }
 
-export async function updateClient(id: string, data: Partial<Client>): Promise<Client> {
+export async function updateClient(id: string, data: ClientInput): Promise<Client> {
   try {
-    return await put(`/clients/${id}`, data);
+    return await putRaw<Client>(`/clients/${id}`, data);
   } catch (e) {
     await queueOfflineAction('update_client', { id, data });
     throw e;
@@ -212,151 +245,187 @@ export async function updateClient(id: string, data: Partial<Client>): Promise<C
 
 export async function deleteClient(id: string): Promise<void> {
   try {
-    await del(`/clients/${id}`);
+    await delRaw(`/clients/${id}`);
   } catch (e) {
     await queueOfflineAction('delete_client', { id });
     throw e;
   }
 }
 
-// ─── Transactions ───
-export async function getTransactions(params?: TransactionFilters): Promise<{ data: Transaction[]; pagination: import('../types').Pagination }> {
-  return get('/transactions', { params }, 'transactions');
+// ───────────────────────── Transactions ─────────────────────────
+
+export function getTransactions(params?: TransactionFilters): Promise<Paginated<Transaction>> {
+  return getRaw<Paginated<Transaction>>('/transactions', { params }, 'transactions');
 }
 
-export async function createTransaction(data: Partial<Transaction>): Promise<Transaction> {
+export function getTransactionsForInvoice(invoiceId: string): Promise<Transaction[]> {
+  return getRaw<Transaction[]>(`/transactions/invoice/${invoiceId}`);
+}
+
+export async function createTransaction(data: TransactionInput): Promise<Transaction> {
   try {
-    return await post('/transactions', data);
+    return await postRaw<Transaction>('/transactions', data);
   } catch (e) {
     await queueOfflineAction('create_transaction', data);
     throw e;
   }
 }
 
-export async function updateTransaction(id: string, data: Partial<Transaction>): Promise<Transaction> {
-  try {
-    return await put(`/transactions/${id}`, data);
-  } catch (e) {
-    await queueOfflineAction('update_transaction', { id, data });
-    throw e;
-  }
-}
-
 export async function deleteTransaction(id: string): Promise<void> {
   try {
-    await del(`/transactions/${id}`);
+    await delRaw(`/transactions/${id}`);
   } catch (e) {
     await queueOfflineAction('delete_transaction', { id });
     throw e;
   }
 }
 
-// ─── Tax Rules ───
-export async function getTaxRules(): Promise<TaxRule[]> {
-  return get('/tax-rules', undefined, 'tax_rules');
+// ─────────────────────────── Tax Rules ───────────────────────────
+
+export function getTaxRules(): Promise<Paginated<TaxRule>> {
+  return getRaw<Paginated<TaxRule>>('/tax-rules', undefined, 'tax_rules');
 }
 
-export async function createTaxRule(data: Partial<TaxRule>): Promise<TaxRule> {
-  return post('/tax-rules', data);
+export function createTaxRule(data: TaxRuleInput): Promise<TaxRule> {
+  return postRaw<TaxRule>('/tax-rules', data);
 }
 
-export async function updateTaxRule(id: string, data: Partial<TaxRule>): Promise<TaxRule> {
-  return put(`/tax-rules/${id}`, data);
+export function updateTaxRule(id: string, data: TaxRuleInput): Promise<TaxRule> {
+  return putRaw<TaxRule>(`/tax-rules/${id}`, data);
 }
 
-export async function deleteTaxRule(id: string): Promise<void> {
-  return del(`/tax-rules/${id}`);
+export function deleteTaxRule(id: string): Promise<void> {
+  return delRaw(`/tax-rules/${id}`);
 }
 
-// ─── Reports ───
-export async function getDashboard(): Promise<DashboardStats> {
-  return get('/reports/dashboard', undefined, 'dashboard');
+// ───────────────────────── Audit Logs ─────────────────────────
+
+export function getAuditLogs(_params?: AuditLogFilters): Promise<AuditLog[]> {
+  // The backend currently returns a bare array (max 1000 rows).
+  return getRaw<AuditLog[]>('/audit-logs', undefined, 'audit_logs');
 }
 
-export async function getRevenueTrend(start?: string, end?: string): Promise<RevenueTrendPoint[]> {
-  return get('/reports/revenue-trend', { params: { start, end } }, 'revenue_trend');
+// ───────────────────────────── Reports ─────────────────────────────
+
+export function getDashboard(): Promise<DashboardStats> {
+  return getRaw<DashboardStats>('/reports/dashboard', undefined, 'dashboard');
 }
 
-export async function getReportsProfitLoss(start: string, end: string): Promise<FinancialReport> {
-  return get('/reports/profit-loss', { params: { start, end } }, 'profit_loss');
+export function getRevenueTrend(start?: string, end?: string): Promise<RevenueTrendPoint[]> {
+  return getRaw<RevenueTrendPoint[]>('/reports/revenue-trend', { params: { start, end } }, 'revenue_trend');
 }
 
-export async function getTopExpenses(start: string, end: string): Promise<TopExpense[]> {
-  return get('/reports/top-expenses', { params: { start, end } }, 'top_expenses');
+export function getProfitLoss(start?: string, end?: string): Promise<ProfitLossReport> {
+  return getRaw<ProfitLossReport>('/reports/profit-loss', { params: { start, end } }, 'profit_loss');
 }
 
-export async function getTaxEstimate(start: string, end: string): Promise<TaxEstimate> {
-  return get('/reports/tax-estimate', { params: { start, end } }, 'tax_estimate');
+export function getTopExpenses(start?: string, end?: string): Promise<TopExpense[]> {
+  return getRaw<TopExpense[]>('/reports/top-expenses', { params: { start, end } }, 'top_expenses');
 }
 
+export function getTaxEstimate(start?: string, end?: string): Promise<TaxEstimate> {
+  return getRaw<TaxEstimate>('/reports/tax-estimate', { params: { start, end } }, 'tax_estimate');
+}
+
+export function getRevenueByClient(start?: string, end?: string): Promise<RevenueByClient[]> {
+  return getRaw<RevenueByClient[]>('/reports/revenue-by-client', { params: { start, end } }, 'revenue_by_client');
+}
+
+export function getReportsSummary(): Promise<ReportsSummary> {
+  return getRaw<ReportsSummary>('/reports/summary');
+}
+
+// Export returns a CSV body with `Content-Disposition: attachment`.
+// We expose the raw text so callers can share/save it.
 export async function exportReport(
-  type: 'profit-loss' | 'revenue' | 'expenses' | 'tax',
-  start: string,
-  end: string
-): Promise<ReportExportResponse> {
-  return get('/reports/export', { params: { type, start, end } });
+  type: 'profit-loss' | 'revenue' | 'expenses',
+  start?: string,
+  end?: string
+): Promise<ReportExportResponse & { csv: string }> {
+  const r = await api.get<string>('/reports/export', {
+    params: { type, start, end },
+    responseType: 'text',
+    transformResponse: (data) => data,
+  });
+  const filename = `${type}_${start || 'all'}_${end || 'now'}.csv`;
+  return { csv: r.data, filename, format: 'csv' };
 }
 
-// ─── Audit ───
-export async function getAuditLogs(params?: AuditLogFilters): Promise<{ data: AuditLog[]; pagination: import('../types').Pagination }> {
-  return get('/audit-logs', { params }, 'audit_logs');
+// Legacy alias used by some screens
+export const getReportsProfitLoss = getProfitLoss;
+
+// ────────────────────────────── AI ──────────────────────────────
+
+export function getAiConfig(): Promise<AiConfig> {
+  return getRaw<AiConfig>('/ai/config');
 }
 
-// ─── AI ───
-export async function chatWithAI(message: string, context?: any): Promise<string> {
-  const res = await post('/ai/chat', { message: typeof message === 'string' ? message : JSON.stringify(message), context });
-  return (res as any)?.response || '';
+export function updateAiConfig(payload: {
+  provider?: string;
+  model?: string;
+  endpoint?: string;
+  apiKey?: string;
+}): Promise<AiConfig> {
+  return putRaw<AiConfig>('/ai/config', payload);
 }
 
-export async function summarizePL(): Promise<FinancialInsight> {
-  return get('/ai/summarize-pl');
+export function aiHealthCheck(): Promise<{ ok: boolean; provider: string; model: string; response: string }> {
+  return postRaw('/ai/test', {});
 }
 
-export async function whoOwesMe(): Promise<{ clients: { clientId: string; clientName: string; amount: number; invoices: Invoice[] }[] }> {
-  return get('/ai/who-owes-me');
+export function listAiModels(): Promise<{ provider: string; endpoint: string; models: string[] }> {
+  return getRaw('/ai/models');
 }
 
-export async function taxAdvice(): Promise<{ tips: string[]; risks: string[]; opportunities: string[] }> {
-  return get('/ai/tax-advice');
+export async function chatWithAI(message: string): Promise<string> {
+  const r = await postRaw<AiChatResponse>('/ai/chat', { message });
+  return r.response;
 }
 
-export async function auditInvoice(id: string): Promise<InvoiceAuditResult> {
-  return get(`/ai/audit-invoice/${id}`);
+export function generateInvoiceDraft(description: string): Promise<AiGeneratedInvoice> {
+  return postRaw<AiGeneratedInvoice>('/ai/generate-invoice', { description });
 }
 
-// ─── Settings ───
-export async function getSettings(): Promise<AppSettings> {
-  return get('/settings', undefined, 'settings');
+export function summarizePL(): Promise<FinancialInsight> {
+  return getRaw<FinancialInsight>('/ai/summarize-pl');
+}
+
+export function whoOwesMe(): Promise<WhoOwesMeResponse> {
+  return getRaw<WhoOwesMeResponse>('/ai/who-owes-me');
+}
+
+export function taxAdvice(): Promise<TaxAdvice> {
+  return getRaw<TaxAdvice>('/ai/tax-advice');
+}
+
+export function auditInvoice(id: string): Promise<InvoiceAuditResult> {
+  return getRaw<InvoiceAuditResult>(`/ai/audit-invoice/${id}`);
+}
+
+// ──────────────────────────── Settings ────────────────────────────
+
+export function getSettings(): Promise<AppSettings> {
+  return getRaw<AppSettings>('/settings', undefined, 'settings');
 }
 
 export async function updateSettings(data: Partial<AppSettings>): Promise<AppSettings> {
   try {
-    return await put('/settings', data);
+    return await putRaw<AppSettings>('/settings', data);
   } catch (e) {
     await queueOfflineAction('update_settings', data);
     throw e;
   }
 }
 
-export async function uploadReceipt(base64: string): Promise<ReceiptUploadResponse> {
-  return post('/settings/upload-receipt', { image: base64 });
+export function uploadReceipt(base64: string): Promise<ReceiptUploadResponse> {
+  return postRaw<ReceiptUploadResponse>('/settings/upload-receipt', { image: base64 });
 }
 
-export async function getProfitLossReport(start?: string, end?: string): Promise<any> {
-  return getReportsProfitLoss(start || '2020-01-01', end || '2030-12-31');
-}
+// ───────────────────────── Legacy aliases ─────────────────────────
+// Used by older screens; safe to remove once those screens are updated.
 
-export async function exportData(format: string): Promise<string> {
-  // stub
-  return '';
-}
+export const getUser = getCurrentUser;
+export const markPaid = markInvoicePaid;
+export const generatePdf = getInvoicePdfUrl;
 
 export { api };
-
-export async function getNextInvoiceNumber(): Promise<{ invoiceNumber: string }> {
-  return get('/invoices/next/number');
-}
-
-export async function getRevenueByClient(start?: string, end?: string): Promise<{ clientName: string; revenue: number }[]> {
-  return get('/reports/revenue-by-client', { params: { start, end } }, 'revenue_by_client');
-}

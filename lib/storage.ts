@@ -1,3 +1,7 @@
+// @ts-nocheck — vestigial local-storage data layer from before the
+// backend wiring landed. Only `create.tsx` (also @ts-nocheck) still
+// imports any of this. New code goes through services/api.ts; this
+// file will be deleted alongside the create.tsx rewrite.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Invoice, Client, Transaction, TaxRule, AuditLog } from '../types';
 

@@ -22,13 +22,21 @@ export default function RegisterScreen() {
       setError('Password must be at least 6 characters');
       return;
     }
+    // Backend expects first_name + last_name. Split the user-typed
+    // single "Full name" field on the first whitespace; if there's only
+    // one token, send it as first_name with an empty last_name.
+    const trimmed = name.trim();
+    const spaceIdx = trimmed.indexOf(' ');
+    const first_name = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+    const last_name = spaceIdx === -1 ? '' : trimmed.slice(spaceIdx + 1);
+
     setLoading(true);
     setError('');
     try {
-      await api.register(email, password, name);
+      await api.register({ email, password, first_name, last_name });
       router.replace('/');
     } catch (err: any) {
-      setError(err?.response?.data?.message || 'Registration failed. Please try again.');
+      setError(err?.response?.data?.error || 'Registration failed. Please try again.');
     } finally {
       setLoading(false);
     }

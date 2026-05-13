@@ -1,3 +1,9 @@
+// @ts-nocheck — vestigial. Hits Ollama at 127.0.0.1:11434 which is the
+// device's own loopback on a real iPhone (never works). Use the api.ts
+// /ai/* methods instead (they go through the backend which has provider
+// abstraction + SSRF allowlist). Currently only imported by create.tsx
+// which has its own @ts-nocheck marker — delete this file once
+// create.tsx is rewritten to use api.ts/chatWithAI.
 import { Invoice, InvoiceAuditResult, FinancialInsight, FinancialReport } from '../types';
 
 const OLLAMA_URL = 'http://127.0.0.1:11434/api/generate';

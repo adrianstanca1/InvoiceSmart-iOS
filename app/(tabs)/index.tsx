@@ -7,6 +7,8 @@ import * as api from '../../services/api';
 import { LoadingSpinner } from '../../components/LoadingSpinner';
 import { EmptyState } from '../../components/EmptyState';
 import { ErrorToast } from '../../components/ErrorToast';
+import type { DashboardStats, RevenueTrendPoint } from '../../types';
+import { fmtMoney } from '../../lib/format';
 
 const screenWidth = Dimensions.get('window').width - 32;
 
@@ -15,15 +17,23 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
-  const [dashboard, setDashboard] = useState<any>(null);
+  const [dashboard, setDashboard] = useState<DashboardStats | null>(null);
   const [trend, setTrend] = useState<{ labels: string[]; data: number[] }>({ labels: [], data: [] });
 
   const loadData = useCallback(async () => {
     setError('');
     try {
-      const [dash, tr] = await Promise.all([api.getDashboard(), api.getRevenueTrend('2025-01-01', '2025-12-31')]);
+      const [dash, tr] = await Promise.all([
+        api.getDashboard(),
+        api.getRevenueTrend('2025-01-01', '2025-12-31'),
+      ]);
       setDashboard(dash);
-      setTrend((tr || []) as any);
+      // Backend returns [{date, revenue, expenses}, ...]. Map to chart shape.
+      const points: RevenueTrendPoint[] = Array.isArray(tr) ? tr : [];
+      setTrend({
+        labels: points.map((p) => new Date(p.date).toLocaleString('en-GB', { month: 'short' })),
+        data: points.map((p) => p.revenue),
+      });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -46,14 +56,16 @@ export default function DashboardScreen() {
 
   if (loading && !refreshing) return <LoadingSpinner />;
 
-  const stats = dashboard || {
+  const stats: DashboardStats = dashboard || {
     totalRevenue: trend.data.reduce((a, b) => a + b, 0),
-    paidAmount: 0,
-    expenses: 0,
+    totalInvoiced: 0,
+    totalPaid: 0,
+    totalExpenses: 0,
     netProfit: 0,
     invoiceCount: 0,
     clientCount: 0,
     overdueCount: 0,
+    outstandingAmount: 0,
   };
 
   const chartData = {
@@ -74,7 +86,7 @@ export default function DashboardScreen() {
         <StatCard
           icon={<TrendingUp size={20} color="#2563eb" />}
           label="Revenue"
-          value={`£${Number(stats.totalRevenue || 0).toFixed(2)}`}
+          value={fmtMoney(stats.totalRevenue)}
         />
         <StatCard
           icon={<FileText size={20} color="#16a34a" />}
@@ -133,7 +145,7 @@ export default function DashboardScreen() {
       <View className="bg-white rounded-xl p-4 shadow-sm mb-6">
         <Text className="font-bold text-slate-800 mb-1">Net Profit</Text>
         <Text className={`text-xl font-bold ${stats.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-          £{Number(stats.netProfit || 0).toFixed(2)}
+          {fmtMoney(stats.netProfit)}
         </Text>
         <Text className="text-slate-500 text-xs mt-1">Paid revenue minus expenses</Text>
       </View>

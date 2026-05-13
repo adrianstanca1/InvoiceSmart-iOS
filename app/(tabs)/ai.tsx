@@ -5,7 +5,8 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { Sparkles, Send, TrendingUp, DollarSign, Receipt } from 'lucide-react-native';
 import { chatWithAI, getInvoices, getTransactions, getClients } from '../../services/api';
-import { Invoice, Transaction, Client } from '../../types';
+import type { Invoice } from '../../types';
+import { toNum } from '../../lib/format';
 
 interface Message { role: 'user' | 'ai'; text: string; }
 
@@ -28,12 +29,12 @@ export default function AIScreen() {
         getTransactions(),
       ]);
       const inv = invRes.data || [];
-      const clients = (clientsRes as any).data || [];
-      const tx = (txRes as any).data || [];
-      const totalRevenue = inv.reduce((s: number, i: Invoice) => s + (i.lineItems || []).reduce((a: number, li: any) => a + (li.quantity || 0) * (li.rate || 0), 0), 0);
+      const clients = clientsRes.data || [];
+      const tx = txRes.data || [];
+      const totalRevenue = inv.reduce((s: number, i: Invoice) => s + toNum(i.total_amount), 0);
       const totalOwed = inv
-        .filter((i: Invoice) => i.status !== 'Paid')
-        .reduce((s: number, i: Invoice) => s + (i.lineItems || []).reduce((a: number, li: any) => a + (li.quantity || 0) * (li.rate || 0), 0), 0);
+        .filter((i: Invoice) => i.status !== 'paid')
+        .reduce((s: number, i: Invoice) => s + toNum(i.amount_due), 0);
       setContext({
         totalInvoices: inv.length,
         totalClients: clients.length,

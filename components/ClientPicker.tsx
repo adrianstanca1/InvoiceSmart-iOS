@@ -19,14 +19,17 @@ export function ClientPicker({
   useEffect(() => {
     if (visible) {
       setLoading(true);
-      api.getClients().then(res => setClients((res as any).data || [])).finally(() => setLoading(false));
+      api.getClients().then(res => setClients(res.data || [])).finally(() => setLoading(false));
     }
   }, [visible]);
 
-  const filtered = clients.filter(c =>
-    c.name.toLowerCase().includes(query.toLowerCase()) ||
-    c.email.toLowerCase().includes(query.toLowerCase())
-  );
+  const filtered = clients.filter(c => {
+    const q = query.toLowerCase();
+    return (
+      c.name.toLowerCase().includes(q) ||
+      (c.email || '').toLowerCase().includes(q)
+    );
+  });
 
   const selected = clients.find(c => c.id === selectedId);
 
@@ -51,7 +54,7 @@ export function ClientPicker({
               renderItem={({ item }) => (
                 <TouchableOpacity onPress={() => { onSelect(item); setVisible(false); setQuery(''); }} className="py-3 border-b border-slate-100">
                   <Text className="text-slate-800 font-medium">{item.name}</Text>
-                  <Text className="text-slate-500 text-xs">{item.email}</Text>
+                  <Text className="text-slate-500 text-xs">{item.email || ''}</Text>
                 </TouchableOpacity>
               )}
             />

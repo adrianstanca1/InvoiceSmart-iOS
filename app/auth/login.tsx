@@ -23,7 +23,7 @@ export default function LoginScreen() {
       await api.login(email, password);
       router.replace('/');
     } catch (err: any) {
-      setError(err?.response?.data?.message || 'Login failed. Please try again.');
+      setError(err?.response?.data?.error || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
     }
