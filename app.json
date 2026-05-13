@@ -35,6 +35,7 @@
     "plugins": [
       "expo-router",
       "./plugins/fix-expo-modules-core.js",
+      "./plugins/patch-expo-router.js",
       "./plugins/podfile-swift-concurrency.js"
     ],
     "extra": {
