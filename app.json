@@ -36,6 +36,7 @@
       "expo-router",
       "./plugins/fix-expo-modules-core.js",
       "./plugins/patch-expo-router.js",
+      "./plugins/patch-expo-image-picker.js",
       "./plugins/podfile-swift-concurrency.js"
     ],
     "extra": {
