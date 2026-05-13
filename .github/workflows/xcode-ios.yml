@@ -100,7 +100,7 @@ jobs:
               '  <key>manageAppVersionAndBuildNumber</key><false/>' \
               '  <key>provisioningProfiles</key>' \
               '  <dict>' \
-              '    <key>com.cortexbuildpro.invoicesmart</key><string>InvoiceSmart App Store</string>' \
+              '    <key>com.cortexbuildpro.invoicesmart</key><string>InvoiceSmart App Store AppleDist</string>' \
               '  </dict>' \
               '</dict>' \
               '</plist>' > ExportOptions.plist
