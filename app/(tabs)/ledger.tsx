@@ -10,9 +10,9 @@ import {
   getTransactions, createTransaction, updateTransaction, deleteTransaction, uploadReceipt,
 } from '../../services/api';
 import { Transaction } from '../../types';
-import DateRangePicker from '../../components/DateRangePicker';
-import LoadingSpinner from '../../components/LoadingSpinner';
-import EmptyState from '../../components/EmptyState';
+import { DateRangePicker } from '../../components/DateRangePicker';
+import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { EmptyState } from '../../components/EmptyState';
 
 export default function LedgerScreen() {
   const router = useRouter();
@@ -36,13 +36,14 @@ export default function LedgerScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getTransactions({
+      const res = await getTransactions({
         type: typeFilter === 'All' ? undefined : typeFilter,
         category: categoryFilter || undefined,
         startDate: dateRange.startDate || undefined,
         endDate: dateRange.endDate || undefined,
       });
-      setTransactions(data.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      const data = (res as any).data || [];
+      setTransactions(data.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()));
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to fetch transactions');
     } finally {

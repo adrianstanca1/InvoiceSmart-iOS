@@ -21,7 +21,7 @@ export default function DashboardScreen() {
   const loadData = useCallback(async () => {
     setError('');
     try {
-      const [dash, tr] = await Promise.all([api.getDashboard(), api.getRevenueTrend()]);
+      const [dash, tr] = await Promise.all([api.getDashboard(), api.getRevenueTrend('2025-01-01', '2025-12-31')]);
       setDashboard(dash);
       setTrend(tr || { labels: [], data: [] });
     } catch (e) {

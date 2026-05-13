@@ -273,7 +273,7 @@ export async function getDashboard(): Promise<DashboardStats> {
   return get('/reports/dashboard', undefined, 'dashboard');
 }
 
-export async function getRevenueTrend(start: string, end: string): Promise<RevenueTrendPoint[]> {
+export async function getRevenueTrend(start?: string, end?: string): Promise<RevenueTrendPoint[]> {
   return get('/reports/revenue-trend', { params: { start, end } }, 'revenue_trend');
 }
 
@@ -303,8 +303,9 @@ export async function getAuditLogs(params?: AuditLogFilters): Promise<{ data: Au
 }
 
 // ─── AI ───
-export async function chatWithAI(message: string): Promise<{ response: string; messages: AIChatMessage[] }> {
-  return post('/ai/chat', { message });
+export async function chatWithAI(message: string, context?: any): Promise<string> {
+  const res = await post('/ai/chat', { message: typeof message === 'string' ? message : JSON.stringify(message), context });
+  return (res as any)?.response || '';
 }
 
 export async function summarizePL(): Promise<FinancialInsight> {
@@ -341,4 +342,21 @@ export async function uploadReceipt(base64: string): Promise<ReceiptUploadRespon
   return post('/settings/upload-receipt', { image: base64 });
 }
 
+export async function getProfitLossReport(start?: string, end?: string): Promise<any> {
+  return getReportsProfitLoss(start || '2020-01-01', end || '2030-12-31');
+}
+
+export async function exportData(format: string): Promise<string> {
+  // stub
+  return '';
+}
+
 export { api };
+
+export async function getNextInvoiceNumber(): Promise<{ invoiceNumber: string }> {
+  return get('/invoices/next/number');
+}
+
+export async function getRevenueByClient(start?: string, end?: string): Promise<{ clientName: string; revenue: number }[]> {
+  return get('/reports/revenue-by-client', { params: { start, end } }, 'revenue_by_client');
+}

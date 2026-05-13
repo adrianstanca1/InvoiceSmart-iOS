@@ -6,10 +6,10 @@ import { useFocusEffect } from 'expo-router';
 import { BarChart, PieChart } from 'react-native-chart-kit';
 import * as Sharing from 'expo-sharing';
 import { Download, FileText } from 'lucide-react-native';
-import DateRangePicker from '../../components/DateRangePicker';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import { DateRangePicker } from '../../components/DateRangePicker';
+import { LoadingSpinner } from '../../components/LoadingSpinner';
 import {
-  getProfitLossReport, getRevenueByClient, getTopExpenses, getTaxEstimate,
+  getReportsProfitLoss, getTopExpenses, getTaxEstimate, getRevenueByClient,
 } from '../../services/api';
 
 const screenWidth = 380;
@@ -32,10 +32,10 @@ export default function ReportsScreen() {
     setLoading(true);
     try {
       const [pnlRes, rev, exp, tax] = await Promise.all([
-        getProfitLossReport(startDate || undefined, endDate || undefined),
-        getRevenueByClient(),
-        getTopExpenses(),
-        getTaxEstimate(),
+        getReportsProfitLoss(startDate || '2020-01-01', endDate || '2030-12-31'),
+        getRevenueByClient(startDate || '2020-01-01', endDate || '2030-12-31'),
+        getTopExpenses(startDate || '2020-01-01', endDate || '2030-12-31'),
+        getTaxEstimate(startDate || '2020-01-01', endDate || '2030-12-31'),
       ]);
       setPnl(pnlRes);
       setRevenueByClient(rev);
@@ -51,19 +51,16 @@ export default function ReportsScreen() {
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const monthlyRevenue = useMemo(() => {
-    return revenueByClient.sort((a, b) => b.revenue - a.revenue);
+    return [...revenueByClient].sort((a, b) => b.revenue - a.revenue);
   }, [revenueByClient]);
 
   async function handleExport(format: 'json' | 'csv') {
     try {
-      const { exportData } = await import('../../services/api');
-      const payload = await exportData(format);
-      const ext = format === 'json' ? 'json' : 'csv';
-      const fileUri = `data:text/${format === 'json' ? 'application/json' : 'text/csv'};base64,${payload}`;
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: format === 'json' ? 'application/json' : 'text/csv', UTI: ext });
+      const blob = await exportReport('profit-loss', startDate || '2020-01-01', endDate || '2030-12-31');
+      if (blob && blob.downloadUrl) {
+        Alert.alert('Export ready', `Download from ${blob.downloadUrl}`);
       } else {
-        Alert.alert('Sharing not available', 'Use export endpoint manually or copy text.');
+        Alert.alert('Export', 'CSV export generated on server.');
       }
     } catch (e: any) {
       Alert.alert('Export failed', e.message || 'Export failed');

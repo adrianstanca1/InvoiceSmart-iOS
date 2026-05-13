@@ -3,9 +3,9 @@ import { View, Text, ScrollView, TouchableOpacity, Alert, ActivityIndicator, Tex
 import { useFocusEffect } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { ShieldCheck, Download, FileText, Search } from 'lucide-react-native';
-import DateRangePicker from '../../components/DateRangePicker';
-import LoadingSpinner from '../../components/LoadingSpinner';
-import EmptyState from '../../components/EmptyState';
+import { DateRangePicker } from '../../components/DateRangePicker';
+import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { EmptyState } from '../../components/EmptyState';
 import { getAuditLogs } from '../../services/api';
 import { AuditLog } from '../../types';
 
@@ -36,7 +36,7 @@ export default function AuditScreen() {
         startDate: startDate || undefined,
         endDate: endDate || undefined,
       });
-      setLogs(data);
+      setLogs((data as any).data || []);
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to fetch audit logs');
     } finally {
@@ -62,7 +62,7 @@ export default function AuditScreen() {
     }
   }
 
-  if (loading && logs.length === 0) return <LoadingSpinner message="Loading audit trail..." />;
+  if (loading && logs.length === 0) return <View className="flex-1 justify-center items-center"><ActivityIndicator size="large" color="#2563eb" /><Text className="text-slate-400 mt-3">Loading audit trail...</Text></View>;
 
   return (
     <ScrollView className="flex-1 bg-slate-50 p-4">
@@ -82,7 +82,7 @@ export default function AuditScreen() {
             <TouchableOpacity key={a} onPress={() => setAction(a)} className={`rounded-full px-3 py-1 border ${action === a ? 'bg-slate-800 border-slate-800' : 'bg-white border-slate-200'}`}><Text className={`text-xs ${action === a ? 'text-white' : 'text-slate-700'}`}>{a}</Text></TouchableOpacity>
           ))}
         </View>
-        <DateRangePicker startDate={startDate} endDate={endDate} onChange={({ startDate: sd, endDate: ed }) => { setStartDate(sd); setEndDate(ed); }} />
+        <DateRangePicker startDate={startDate} endDate={endDate} onChangeStart={setStartDate} onChangeEnd={setEndDate} />
         <TouchableOpacity onPress={load} className="bg-blue-600 rounded-lg py-2 items-center"><Text className="text-white font-medium">Apply Filters</Text></TouchableOpacity>
       </View>
 
@@ -95,7 +95,7 @@ export default function AuditScreen() {
       </View>
 
       {logs.length === 0 && !loading ? (
-        <EmptyState message="No audit events yet." />
+        <View className="items-center py-12"><FileText size={48} color="#94a3b8" /><Text className="text-slate-400 mt-4">No audit events yet.</Text></View>
       ) : (
         logs.map(log => (
           <View key={log.id} className="bg-white rounded-xl p-4 shadow-sm mb-3">

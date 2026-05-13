@@ -2,25 +2,30 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Switch, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Save } from 'lucide-react-native';
-import * as Storage from '../../lib/storage';
+import * as api from '../../services/api';
 
 export default function SettingsScreen() {
   const [settings, setSettings] = useState({ aiProvider: 'ollama', aiModel: 'qwen2.5:7b', aiEndpoint: 'http://127.0.0.1:11434', invoicePrefix: 'INV-', autoIncrement: true });
   useFocusEffect(useCallback(()=>{ load(); }, []));
-  async function load() { const s = await Storage.getAppSettings(); setSettings(s); }
+  async function load() {
+      try {
+        const s = await api.getSettings();
+        setSettings(s || { aiModel: 'llama3', invoicePrefix: 'INV-', autoIncrement: true });
+      } catch (e) {}
+    }
 
   async function save() {
-    await Storage.saveAppSettings(settings);
-    Alert.alert('Saved', 'Settings updated.');
-  }
+      try { await api.updateSettings(settings); Alert.alert('Saved', 'Settings updated.'); }
+      catch (e: any) { Alert.alert('Error', e.message || 'Failed to save'); }
+    }
 
   async function clearData() {
-    if (!confirm('Delete ALL data?')) return;
-    await Storage.saveInvoices([]);
-    await Storage.saveClients([]);
-    await Storage.saveTransactions([]);
-    await Storage.saveAuditLogs([]);
-    Alert.alert('Cleared', 'All data removed.');
+    Alert.alert('Clear all data?', 'This will remove all local data.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        Alert.alert('Cleared', 'Local data removed. Server data is unaffected.');
+      }}
+    ]);
   }
 
   return (

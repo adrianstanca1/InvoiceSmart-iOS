@@ -1,3 +1,4 @@
+/// <reference types="../nativewind.d.ts" />
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';

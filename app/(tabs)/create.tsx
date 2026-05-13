@@ -75,7 +75,45 @@ export default function InvoiceBuilderScreen() {
         (async () => {
           if (params.id) {
             const found = await api.getInvoice(params.id as string);
-            if (found) setInvoice(found);
+            if (found) {
+              const normalized: Invoice = {
+                id: found.id,
+                clientId: (found as any).client_id,
+                invoiceNumber: (found as any).invoice_number || 'INV-001',
+                date: (found as any).issue_date || new Date().toISOString().split('T')[0],
+                dueDate: (found as any).due_date || '',
+                fromName: (found as any).from_name || '',
+                fromEmail: (found as any).from_email || '',
+                fromAddress: typeof (found as any).from_address === 'object' ? JSON.stringify((found as any).from_address) : ((found as any).from_address || ''),
+                toName: (found as any).to_name || '',
+                toEmail: (found as any).to_email || '',
+                toAddress: typeof (found as any).to_address === 'object' ? JSON.stringify((found as any).to_address) : ((found as any).to_address || ''),
+                clientVatNumber: (found as any).client_vat_number || '',
+                lineItems: ((found as any).line_items || []).map((li: any, idx: number) => ({
+                  id: li.id || String(idx + 1),
+                  description: li.description || '',
+                  quantity: li.quantity || 1,
+                  rate: li.unit_price || li.rate || 0,
+                  isLabor: li.is_labor || false,
+                  taxRate: li.tax_rate,
+                })),
+                notes: found.notes || '',
+                terms: found.terms || 'Payment due within 30 days.',
+                currency: found.currency || 'GBP',
+                taxRate: (found as any).tax_rate || 20,
+                discountRate: (found as any).discount_rate || 0,
+                retentionRate: (found as any).retention_rate || 0,
+                cisRate: (found as any).cis_rate || 0,
+                status: (found.status || 'Draft').replace(/^\w/, (c: string) => c.toUpperCase()),
+                template: (found.template || 'modern') as any,
+                brandColor: (found as any).brand_color || '#2563eb',
+                reverseCharge: (found as any).reverse_charge || false,
+                paymentGateway: ((found as any).payment_gateway || 'none') as any,
+                showNotes: (found as any).show_notes !== false,
+                showTerms: (found as any).show_terms !== false,
+              };
+              setInvoice(normalized);
+            }
           } else {
             const num = await api.getNextInvoiceNumber();
             setInvoice(inv => ({ ...inv, id: Date.now().toString(36), invoiceNumber: num }));
@@ -131,14 +169,35 @@ export default function InvoiceBuilderScreen() {
     });
   }
 
+  function toBackendPayload(inv: Invoice, statusOverride?: Invoice['status']) {
+    return {
+      client_id: inv.clientId,
+      status: (statusOverride || inv.status).toLowerCase(),
+      issue_date: inv.date,
+      due_date: inv.dueDate,
+      notes: inv.notes,
+      terms: inv.terms,
+      tax_rate: inv.taxRate,
+      discount_rate: inv.discountRate,
+      retention_rate: inv.retentionRate,
+      cis_rate: inv.cisRate,
+      line_items: inv.lineItems.map(li => ({
+        description: li.description,
+        quantity: li.quantity,
+        unit_price: li.rate,
+      })),
+      invoice_prefix: (inv.invoiceNumber || 'INV').split('-')[0],
+      auto_increment: true,
+    };
+  }
+
   async function persist(statusOverride?: Invoice['status']) {
     if (!invoice.toName) { Alert.alert('Error', 'Client name is required'); return null; }
-    const payload = statusOverride ? { ...invoice, status: statusOverride } : invoice;
-    if (!payload.id) payload.id = Date.now().toString(36);
+    const payload = toBackendPayload(invoice, statusOverride);
     if (params.id) {
       return api.updateInvoice(params.id as string, payload);
     }
-    return api.createInvoice(payload);
+    return api.createInvoice(payload as any);
   }
 
   async function saveDraft() {
@@ -178,7 +237,7 @@ export default function InvoiceBuilderScreen() {
     setSaving(true);
     setError('');
     try {
-      const saved = await api.updateInvoice(invoice.id, { status: 'Paid' });
+      const saved = await api.markPaid(invoice.id);
       if (saved) {
         setInvoice(saved);
         Alert.alert('Updated', `Invoice ${saved.invoiceNumber} marked as Paid.`);

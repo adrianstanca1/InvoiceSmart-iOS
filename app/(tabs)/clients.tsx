@@ -2,30 +2,46 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Plus, Trash2, Save, Users } from 'lucide-react-native';
-import * as Storage from '../../lib/storage';
+import * as api from '../../services/api';
 import { Client } from '../../types';
 
 export default function ClientsScreen() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Client>({ id: '', name: '', email: '', phone: '', address: '' });
 
   useFocusEffect(useCallback(() => { load(); }, []));
-  async function load() { const c = await Storage.getClients(); setClients(c); }
+  async function load() {
+      setLoading(true);
+      try {
+        const result = await api.getClients();
+        setClients(result.data || []);
+      } catch (e) { setClients([]); }
+      setLoading(false);
+    }
 
   async function saveClient() {
     if (!form.name) { Alert.alert('Error', 'Name required'); return; }
-    const list = await Storage.getClients();
-    const idx = list.findIndex(c => c.id === form.id);
-    if (idx >= 0) list[idx] = form; else list.push({ ...form, id: Date.now().toString(36) });
-    await Storage.saveClients(list);
-    await Storage.logAction('Created', 'Client', form.id, form.name, 'Saved from mobile');
-    setEditing(false); setForm({ id: '', name: '', email: '', phone: '', address: '' }); load();
+    try {
+      if (form.id) {
+        await api.updateClient(form.id, form);
+      } else {
+        await api.createClient(form);
+      }
+      setEditing(false); setForm({ id: '', name: '', email: '', phone: '', address: '' }); load();
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to save client');
+    }
   }
 
   async function deleteClient(id: string) {
-    const list = (await Storage.getClients()).filter(c => c.id !== id);
-    await Storage.saveClients(list); load();
+    Alert.alert('Delete client?', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try { await api.deleteClient(id); load(); } catch(e: any) { Alert.alert('Error', e.message || 'Failed to delete'); }
+      }}
+    ]);
   }
 
   return (

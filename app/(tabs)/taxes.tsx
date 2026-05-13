@@ -6,8 +6,8 @@ import {
   getTaxRules, createTaxRule, updateTaxRule, deleteTaxRule, getInvoices,
 } from '../../services/api';
 import { TaxRule, Invoice } from '../../types';
-import LoadingSpinner from '../../components/LoadingSpinner';
-import EmptyState from '../../components/EmptyState';
+import { LoadingSpinner } from '../../components/LoadingSpinner';
+import { EmptyState } from '../../components/EmptyState';
 
 export default function TaxManagerScreen() {
   const [rules, setRules] = useState<TaxRule[]>([]);
@@ -86,7 +86,7 @@ export default function TaxManagerScreen() {
 
   const invoicesForRule = (ruleId?: string) => {
     if (!ruleId) return [];
-    return invoices.filter(inv => inv.taxRuleId === ruleId || inv.taxRate === rules.find(r => r.id === ruleId)?.rate);
+    return invoices.filter(inv => (inv as any).taxRuleId === ruleId || inv.taxRate === rules.find(r => r.id === ruleId)?.rate);
   };
 
   if (loading && rules.length === 0) return <LoadingSpinner message="Loading tax rules..." />;

@@ -2,22 +2,34 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Trash2, FileText, Search } from 'lucide-react-native';
-import * as Storage from '../../lib/storage';
+import * as api from '../../services/api';
 import { Invoice } from '../../types';
 
 export default function HistoryScreen() {
   const router = useRouter();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>('All');
   const [search, setSearch] = useState('');
 
   useFocusEffect(useCallback(() => { load(); }, []));
-  async function load() { const invs = await Storage.getInvoices(); setInvoices(invs); }
+  async function load() {
+      setLoading(true);
+      try {
+        const result = await api.getInvoices();
+        setInvoices(result.data || []);
+      } catch (e) { setInvoices([]); }
+      setLoading(false);
+    }
 
   async function deleteInvoice(id: string) {
-    const invs = (await Storage.getInvoices()).filter(i => i.id !== id);
-    await Storage.saveInvoices(invs); load();
-  }
+      Alert.alert('Delete invoice?', 'This cannot be undone.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try { await api.deleteInvoice(id); load(); } catch(e) {}
+        }}
+      ]);
+    }
 
   const filtered = invoices
     .filter(inv => filter === 'All' || inv.status === filter)
@@ -54,7 +66,7 @@ export default function HistoryScreen() {
           </View>
         </TouchableOpacity>
       ))}
-      {filtered.length === 0 && <Text className="text-slate-400 text-center mt-8">No invoices found.</Text>}
+      {filtered.length === 0 && !loading ? <Text className="text-slate-400 text-center mt-8">No invoices found.</Text> : null}
     </ScrollView>
   );
 }

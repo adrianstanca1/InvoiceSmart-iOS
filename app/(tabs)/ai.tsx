@@ -22,15 +22,18 @@ export default function AIScreen() {
   const loadContext = useCallback(async () => {
     setCtxLoading(true);
     try {
-      const [inv, clients, tx] = await Promise.all([
+      const [invRes, clientsRes, txRes] = await Promise.all([
         getInvoices(),
         getClients(),
         getTransactions(),
       ]);
-      const totalRevenue = inv.reduce((s, i) => s + i.lineItems.reduce((a, li) => a + li.quantity * li.rate, 0), 0);
+      const inv = invRes.data || [];
+      const clients = (clientsRes as any).data || [];
+      const tx = (txRes as any).data || [];
+      const totalRevenue = inv.reduce((s: number, i: Invoice) => s + (i.lineItems || []).reduce((a: number, li: any) => a + (li.quantity || 0) * (li.rate || 0), 0), 0);
       const totalOwed = inv
-        .filter(i => i.status !== 'Paid')
-        .reduce((s, i) => s + i.lineItems.reduce((a, li) => a + li.quantity * li.rate, 0), 0);
+        .filter((i: Invoice) => i.status !== 'Paid')
+        .reduce((s: number, i: Invoice) => s + (i.lineItems || []).reduce((a: number, li: any) => a + (li.quantity || 0) * (li.rate || 0), 0), 0);
       setContext({
         totalInvoices: inv.length,
         totalClients: clients.length,
@@ -50,15 +53,16 @@ export default function AIScreen() {
   async function send(textOverride?: string) {
     const userText = textOverride !== undefined ? textOverride : input;
     if (!userText.trim()) return;
-    const nextMessages: Message[] = [...messages, { role: 'user', text: userText }];
+    const nextMessages: Message[] = [...messages, { role: 'user' as const, text: userText }];
     if (!textOverride) setInput('');
     setMessages(nextMessages);
     setLoading(true);
     try {
-      const reply = await chatWithAI(nextMessages, context);
-      setMessages(prev => [...prev, { role: 'ai', text: reply }]);
+      const prompt = `Context: ${JSON.stringify(context)}\n\nUser messages: ${nextMessages.map(m => m.role + ': ' + m.text).join('\n')}\nRespond as an accountant.`;
+      const reply = await chatWithAI(prompt);
+      setMessages((prev: Message[]) => [...prev, { role: 'ai' as const, text: reply }]);
     } catch (e: any) {
-      setMessages(prev => [...prev, { role: 'ai', text: 'Sorry, AI service unavailable. Please check connection or try again later.' }]);
+      setMessages((prev: Message[]) => [...prev, { role: 'ai' as const, text: 'Sorry, AI service unavailable. Please check connection or try again later.' }]);
     } finally {
       setLoading(false);
     }
