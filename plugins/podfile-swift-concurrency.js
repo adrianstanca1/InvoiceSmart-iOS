@@ -14,6 +14,12 @@ function withPodfileSwiftConcurrencyFix(config) {
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+      # Force Swift 5 language mode for pods so they don't inherit Xcode 17's
+      # Swift 6 default. Swift 5 mode recognises @MainActor (5.5+) AND has
+      # strict concurrency opt-in (off by default; SWIFT_STRICT_CONCURRENCY
+      # above keeps it minimal even if something flips it on).
+      # NOTE: do NOT use '5.0' (literal 5.0 syntax — predates @MainActor).
+      config.build_settings['SWIFT_VERSION'] = '5'
       config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
       config.build_settings['SWIFT_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
     end
@@ -43,6 +49,12 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
+      # Force Swift 5 language mode for pods so they don't inherit Xcode 17's
+      # Swift 6 default. Swift 5 mode recognises @MainActor (5.5+) AND has
+      # strict concurrency opt-in (off by default; SWIFT_STRICT_CONCURRENCY
+      # above keeps it minimal even if something flips it on).
+      # NOTE: do NOT use '5.0' (literal 5.0 syntax — predates @MainActor).
+      config.build_settings['SWIFT_VERSION'] = '5'
       config.build_settings['GCC_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
       config.build_settings['SWIFT_TREAT_WARNINGS_AS_ERRORS'] = 'NO'
     end
