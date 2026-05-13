@@ -25,7 +25,7 @@ index 2daec5d..c654c46 100644
  - (UIView *)superViewWithModuleName:(NSString *)moduleName
                    initialProperties:(nullable NSDictionary *)initialProperties
 diff --git a/node_modules/expo/ios/AppDelegates/EXReactRootViewFactory.mm b/node_modules/expo/ios/AppDelegates/EXReactRootViewFactory.mm
-index 1bc361f..56656ef 100644
+index 1bc361f..a03e78a 100644
 --- a/node_modules/expo/ios/AppDelegates/EXReactRootViewFactory.mm
 +++ b/node_modules/expo/ios/AppDelegates/EXReactRootViewFactory.mm
 @@ -2,7 +2,6 @@
@@ -36,33 +36,33 @@ index 1bc361f..56656ef 100644
  #import <ExpoModulesCore/EXReactDelegateProtocol.h>
  
  @interface RCTRootViewFactory ()
-@@ -27,26 +26,20 @@
- - (UIView *)viewWithModuleName:(NSString *)moduleName
-              initialProperties:(nullable NSDictionary *)initialProperties
-                  launchOptions:(nullable NSDictionary *)launchOptions
--          devMenuConfiguration:(RCTDevMenuConfiguration *)devMenuConfiguration
- {
-   if (self.reactDelegate != nil) {
-     return [((id<EXReactDelegateProtocol>)self.reactDelegate) createReactRootViewWithModuleName:moduleName initialProperties:initialProperties launchOptions:launchOptions];
-   }
--  return [super viewWithModuleName:moduleName initialProperties:initialProperties launchOptions:launchOptions devMenuConfiguration:devMenuConfiguration];
-+  return [super viewWithModuleName:moduleName initialProperties:initialProperties launchOptions:launchOptions];
+@@ -24,29 +23,6 @@
  }
  
- - (UIView *)superViewWithModuleName:(NSString *)moduleName
-                   initialProperties:(nullable NSDictionary *)initialProperties
-                       launchOptions:(nullable NSDictionary *)launchOptions
+ #if TARGET_OS_IOS || TARGET_OS_TV
+-- (UIView *)viewWithModuleName:(NSString *)moduleName
+-             initialProperties:(nullable NSDictionary *)initialProperties
+-                 launchOptions:(nullable NSDictionary *)launchOptions
+-          devMenuConfiguration:(RCTDevMenuConfiguration *)devMenuConfiguration
+-{
+-  if (self.reactDelegate != nil) {
+-    return [((id<EXReactDelegateProtocol>)self.reactDelegate) createReactRootViewWithModuleName:moduleName initialProperties:initialProperties launchOptions:launchOptions];
+-  }
+-  return [super viewWithModuleName:moduleName initialProperties:initialProperties launchOptions:launchOptions devMenuConfiguration:devMenuConfiguration];
+-}
+-
+-- (UIView *)superViewWithModuleName:(NSString *)moduleName
+-                  initialProperties:(nullable NSDictionary *)initialProperties
+-                      launchOptions:(nullable NSDictionary *)launchOptions
 -               devMenuConfiguration:(nullable RCTDevMenuConfiguration *)devMenuConfiguration
- {
+-{
 -  if (devMenuConfiguration == nil) {
 -    devMenuConfiguration = [RCTDevMenuConfiguration defaultConfiguration];
 -  }
 -
 -  return [super viewWithModuleName:moduleName initialProperties:initialProperties launchOptions:launchOptions devMenuConfiguration:devMenuConfiguration];
-+  return [super viewWithModuleName:moduleName initialProperties:initialProperties launchOptions:launchOptions];
- }
+-}
 -#else
-+#endif
  - (UIView *)viewWithModuleName:(NSString *)moduleName
               initialProperties:(nullable NSDictionary *)initialProperties
                   launchOptions:(nullable NSDictionary *)launchOptions
