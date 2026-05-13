@@ -11,9 +11,9 @@ jobs:
     timeout-minutes: 40
     env:
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
-      IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
-      IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
-      IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
+      ASC_KEY_ID: S7PSXPJ963
+      ASC_ISSUER_ID: 4e694aa4-8cbc-4de4-bdf2-0ace72694564
+      DEVELOPMENT_TEAM: 4G3G5MX9BH
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,63 +23,75 @@ jobs:
       - run: npm ci --legacy-peer-deps
       - run: npm install -g eas-cli@latest
 
-      - name: Prebuild Xcode project
+      - name: Expo Prebuild
         run: npx expo prebuild --platform ios --non-interactive
 
-      - name: Clean iOS Build (verification only)
-        continue-on-error: true
-        run: |
-          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphonesimulator -configuration Release clean build CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-
-      - name: Check signing secrets
-        id: signing_check
-        run: |
-          if [ -n "$IOS_DISTRIBUTION_P12" ] && [ -n "$IOS_PROVISIONING_PROFILE" ] && [ -n "$IOS_P12_PASSWORD" ]; then
-            echo "has_signing=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_signing=false" >> "$GITHUB_OUTPUT"
-            echo "Signing secrets not fully configured. Skipping signing steps."
-          fi
+      - name: Pod Install
+        run: cd ios && pod install
 
       - name: Setup Apple API Key
-        if: steps.signing_check.outputs.has_signing == 'true'
         run: |
           mkdir -p ~/.config/apple
-          echo "$ASC_PRIVATE_KEY" > ~/.config/apple/AuthKey_S7PSXPJ963.p8
-          chmod 600 ~/.config/apple/AuthKey_S7PSXPJ963.p8
+          echo "$ASC_PRIVATE_KEY" > ~/.config/apple/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/.config/apple/AuthKey_${ASC_KEY_ID}.p8
 
-      - name: Setup Signing
-        if: steps.signing_check.outputs.has_signing == 'true'
+      - name: Build Unsigned Archive (compile check)
         run: |
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          echo "$IOS_DISTRIBUTION_P12" | base64 -d > /tmp/ios_dist.p12
-          echo "$IOS_PROVISIONING_PROFILE" | base64 -d > "$HOME/Library/MobileDevice/Provisioning Profiles/a1a5ae3f-2bcd-4c4a-bf27-42cb85fe5cff.mobileprovision"
-          security create-keychain -p "buildtrack123" build.keychain
-          security unlock-keychain -p "buildtrack123" build.keychain
-          security set-keychain-settings -t 3600 -u build.keychain
-          security import /tmp/ios_dist.p12 -k build.keychain -P "$IOS_P12_PASSWORD" -A
-          security list-keychains -s ~/Library/Keychains/build.keychain
-          security set-key-partition-list -S apple-tool:,apple: -k "buildtrack123" build.keychain || true
-
-      - name: Build iOS Archive
-        if: steps.signing_check.outputs.has_signing == 'true'
-        run: |
-          PROV_UUID="a1a5ae3f-2bcd-4c4a-bf27-42cb85fe5cff"
-          xcodebuild -workspace ios/InvoiceSmart.xcworkspace -scheme InvoiceSmart -sdk iphoneos -configuration Release archive -archivePath build/InvoiceSmart.xcarchive DEVELOPMENT_TEAM="4G3G5MX9BH" CODE_SIGN_STYLE="Manual" PROVISIONING_PROFILE_SPECIFIER="InvoiceSmart App Store" PROVISIONING_PROFILE="${PROV_UUID}" -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
+          xcodebuild -workspace ios/InvoiceSmart.xcworkspace \
+            -scheme InvoiceSmart \
+            -sdk iphoneos \
+            -configuration Release \
+            archive \
+            -archivePath build/InvoiceSmart.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: Export Signed IPA
-        if: steps.signing_check.outputs.has_signing == 'true'
         run: |
-          printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '  <key>method</key><string>app-store</string>' '  <key>signingStyle</key><string>automatic</string>' '  <key>teamID</key><string>4G3G5MX9BH</string>' '  <key>thinning</key><string>&lt;none&gt;</string>' '  <key>stripSwiftSymbols</key><true/>' '  <key>compileBitcode</key><true/>' '  <key>uploadSymbols</key><true/>' '</dict>' '</plist>' > ExportOptions.plist
-          xcodebuild -exportArchive -archivePath build/InvoiceSmart.xcarchive -exportPath build/Exported -exportOptionsPlist ExportOptions.plist -authenticationKeyPath "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8" -authenticationKeyID S7PSXPJ963 -authenticationKeyIssuerID 4e694aa4-8cbc-4de4-bdf2-0ace72694564 -allowProvisioningUpdates
+          cat > ExportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>4G3G5MX9BH</string>
+            <key>thinning</key><string>&lt;none&gt;</string>
+            <key>compileBitcode</key><false/>
+            <key>uploadBitcode</key><false/>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath build/InvoiceSmart.xcarchive \
+            -exportPath build/Exported \
+            -exportOptionsPlist ExportOptions.plist \
+            -authenticationKeyPath "$HOME/.config/apple/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "${ASC_KEY_ID}" \
+            -authenticationKeyIssuerID "${ASC_ISSUER_ID}" \
+            -allowProvisioningUpdates
+
+      - name: Find IPA
+        run: ls -la build/Exported/ && find build/Exported -name "*.ipa"
 
       - name: Upload to TestFlight
-        if: steps.signing_check.outputs.has_signing == 'true'
         run: |
-          xcrun altool --upload-app --type ios --file "build/Exported/InvoiceSmart.ipa" --apiKey S7PSXPJ963 --apiIssuer 4e694aa4-8cbc-4de4-bdf2-0ace72694564
+          # Try altool with API key first
+          xcrun altool --validate-app \
+            --type ios \
+            --file "build/Exported/$(ls build/Exported/*.ipa | head -1)" \
+            --apiKey "${ASC_KEY_ID}" \
+            --apiIssuer "${ASC_ISSUER_ID}" || true
+          xcrun altool --upload-app \
+            --type ios \
+            --file "build/Exported/$(ls build/Exported/*.ipa | head -1)" \
+            --apiKey "${ASC_KEY_ID}" \
+            --apiIssuer "${ASC_ISSUER_ID}" || true
 
       - name: Upload Artifact
-        if: steps.signing_check.outputs.has_signing == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: InvoiceSmart-IPA
