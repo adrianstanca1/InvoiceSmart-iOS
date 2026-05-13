@@ -9,10 +9,7 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal",
-      "ios": {
-        "enterpriseProvisioning": "universal"
-      }
+      "distribution": "internal"
     },
     "production": {
       "autoIncrement": true
@@ -21,8 +18,8 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "REPLACE_WITH_APP_ID",
-        "ascApiKeyPath": "$HOME/.config/apple/AuthKey_S7PSXPJ963.p8",
+        "ascAppId": "6768035036",
+        "ascApiKeyPath": "/root/.config/apple/AuthKey_S7PSXPJ963.p8",
         "ascApiKeyIssuerId": "4e694aa4-8cbc-4de4-bdf2-0ace72694564",
         "ascApiKeyId": "S7PSXPJ963"
       }
