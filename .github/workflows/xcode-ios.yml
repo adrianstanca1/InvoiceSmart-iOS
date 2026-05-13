@@ -36,7 +36,6 @@ jobs:
           security set-keychain-settings -t 3600 -u build.keychain
           security import /tmp/ios_dist.key -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t priv
           security import /tmp/ios_dist.crt -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t cert
-          security import /tmp/ios_dist.p12 -k build.keychain -P "${{ secrets.IOS_P12_PASSWORD }}" -A -t cert
           security list-keychains -s ~/Library/Keychains/build.keychain
           security set-key-partition-list -S apple-tool:,apple: -k "buildtrack123" build.keychain || true
 
