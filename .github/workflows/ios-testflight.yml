@@ -1,0 +1,199 @@
+name: Deploy to TestFlight
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_eas:
+        description: 'Use EAS build fallback instead of local xcodebuild'
+        type: boolean
+        default: false
+      version:
+        description: 'Version number override (e.g. 1.2.3)'
+        required: false
+        default: ''
+
+concurrency:
+  group: deploy-testflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  xcode-build:
+    if: ${{ !inputs.use_eas }}
+    name: Build & Deploy to TestFlight (xcodebuild)
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: S7PSXPJ963
+      ASC_ISSUER_ID: 4e694aa4-8cbc-4de4-bdf2-0ace72694564
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      DEVELOPMENT_TEAM: 4G3G5MX9BH
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Expo prebuild
+        run: npx expo prebuild --platform ios --non-interactive
+
+      - name: Select Xcode 16
+        run: |
+          echo "Available Xcode versions:"
+          ls /Applications/ | grep Xcode | sort
+          echo ""
+          echo "Selecting Xcode 16 explicitly..."
+          sudo xcode-select -s "/Applications/Xcode_16.app/Contents/Developer" || true
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphoneos --show-sdk-build-version
+
+      - name: Setup signing
+        run: scripts/setup-signing.sh
+        env:
+          IOS_DISTRIBUTION_CERT: ${{ secrets.IOS_DISTRIBUTION_CERT }}
+          IOS_DISTRIBUTION_KEY: ${{ secrets.IOS_DISTRIBUTION_KEY }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+
+      - name: Bump build number
+        run: |
+          BUILD_NUMBER=$(git rev-list --count HEAD)
+          echo "BUILD_NUMBER=$BUILD_NUMBER"
+          PLIST="ios/InvoiceSmart/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+
+      - name: Build unsigned archive
+        run: |
+          xcodebuild archive \
+            -workspace ios/InvoiceSmart.xcworkspace \
+            -scheme InvoiceSmart \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "build/InvoiceSmart.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO
+
+      - name: Export signed IPA
+        run: |
+          mkdir -p build
+
+          # Discover signing identity from keychain created by setup-signing.sh
+          SIGNING_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -oE '"[^"]+"' | head -1 | tr -d '"')
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "::error::Failed to discover codesigning identity from keychain"
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
+          echo "Detected signing identity: $SIGNING_IDENTITY"
+
+          # Profile name is exported by setup-signing.sh (fallback to BuildTrack App Store v3)
+          PROFILE_NAME="${PROFILE_NAME:-BuildTrack App Store v3}"
+          echo "Using profile name: $PROFILE_NAME"
+
+          # 🚨 BUNDLE ID MISMATCH WARNING 🚨
+          # This workflow targets bundle ID "com.cortexbuildpro.invoicesmart".
+          # The provisioning profile "BuildTrack App Store v3" (7F436XV4VH)
+          # is believed to cover "ro.stancainvest.buildtrack".  If it does NOT
+          # also cover "com.cortexbuildpro.invoicesmart", the export step will
+          # fail.  Update the IOS_PROVISIONING_PROFILE secret with a profile
+          # that includes the correct bundle ID (e.g. "InvoiceSmart App Store").
+
+          cat > build/ExportOptions.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>teamID</key>
+            <string>4G3G5MX9BH</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>com.cortexbuildpro.invoicesmart</key>
+              <string>${PROFILE_NAME}</string>
+            </dict>
+            <key>signingCertificate</key>
+            <string>${SIGNING_IDENTITY}</string>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath "build/InvoiceSmart.xcarchive" \
+            -exportPath "build/InvoiceSmart.ipa" \
+            -exportOptionsPlist build/ExportOptions.plist
+
+      - name: Setup App Store Connect API key
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Upload to TestFlight
+        run: |
+          IPA_PATH=$(find build/InvoiceSmart.ipa -name "*.ipa" -type f | head -1)
+          echo "Uploading: $IPA_PATH"
+          ls -la "$IPA_PATH" 2>/dev/null || true
+          xcrun altool --upload-app \
+            --type ios \
+            --file "$IPA_PATH" \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: InvoiceSmart-IPA
+          path: build/InvoiceSmart.ipa/*.ipa
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" || true
+          rm -rf ~/.appstoreconnect/private_keys || true
+
+  eas-build:
+    if: ${{ inputs.use_eas }}
+    name: Build via EAS (fallback)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli@latest
+
+      - name: EAS Build
+        run: eas build --platform ios --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
